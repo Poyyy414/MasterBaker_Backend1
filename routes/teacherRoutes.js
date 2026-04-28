@@ -1,6 +1,9 @@
 const express = require('express');
 const router  = express.Router();
 
+const { verifyToken, isTeacher } = require('../middleware/authMiddleware');
+const auth = [verifyToken, isTeacher]; // reusable array
+
 const {
   getAllTeachers,
   getTeacherById,
@@ -11,26 +14,42 @@ const {
 const {
   createActivity,
   getAllActivities,
-  getActivityDetail,
+  getActivityById,
   updateActivity,
   deleteActivity,
 } = require('../controllers/activityController');
 
-const { verifyToken, isTeacher } = require('../middleware/authMiddleware');
+const {
+  createCheckpoint,
+  updateCheckpoint,
+  deleteCheckpoint,
+} = require('../controllers/checkpointController');
+
+const {
+  createQuestion,
+  deleteQuestion,
+} = require('../controllers/questionController');
 
 // ── Teacher profile ───────────────────────────────────────────────────────────
-router.get   ('/',    getAllTeachers);       // GET    /api/teacher
-router.get   ('/:id', getTeacherById);      // GET    /api/teacher/:id
-router.put   ('/:id', updateTeacher);       // PUT    /api/teacher/:id
-router.delete('/:id', deleteTeacher);       // DELETE /api/teacher/:id
+router.get   ('/',    auth, getAllTeachers);
+router.get   ('/:id', auth, getTeacherById);
+router.put   ('/:id', auth, updateTeacher);
+router.delete('/:id', auth, deleteTeacher);
 
 // ── Activity management ───────────────────────────────────────────────────────
-router.post  ('/activities',     createActivity);    // POST   /api/teacher/activities
-router.get   ('/activities',     getAllActivities);   // GET    /api/teacher/activities
-router.get   ('/activities/:id', getActivityDetail); // GET    /api/teacher/activities/:id
-router.put   ('/activities/:id', updateActivity);    // PUT    /api/teacher/activities/:id
-router.delete('/activities/:id', deleteActivity);    // DELETE /api/teacher/activities/:id
+router.post  ('/activities',     auth, createActivity);
+router.get   ('/activities',     auth, getAllActivities);
+router.get   ('/activities/:id', auth, getActivityById);
+router.put   ('/activities/:id', auth, updateActivity);
+router.delete('/activities/:id', auth, deleteActivity);
 
-router.use(verifyToken, isTeacher);
+// ── Checkpoint management ─────────────────────────────────────────────────────
+router.post  ('/activities/:activity_id/checkpoints', auth, createCheckpoint);
+router.put   ('/checkpoints/:checkpoint_id',          auth, updateCheckpoint);
+router.delete('/checkpoints/:checkpoint_id',          auth, deleteCheckpoint);
+
+// ── Question management ───────────────────────────────────────────────────────
+router.post  ('/checkpoints/:checkpoint_id/questions', auth, createQuestion);
+router.delete('/questions/:question_id',               auth, deleteQuestion);
 
 module.exports = router;

@@ -1,63 +1,58 @@
+const db     = require('../config/db');
 const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
-const db = require('../config/db'); // your mysql2 connection
+const jwt    = require('jsonwebtoken');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'your_jwt_secret';
-
-// ─── REGISTER ────────────────────────────────────────────────────────────────
+// ─── REGISTER ─────────────────────────────────────────────────────────────────
 const register = async (req, res) => {
+  const conn = await db.getConnection();
   try {
-    const { firstname, lastname, email, password, role } = req.body;
+    await conn.beginTransaction();
 
-    // Validate required fields
-    if (!firstname || !email || !password || !role) {
-      return res.status(400).json({ message: 'All fields are required.' });
+    const { firstname, lastname, email, password, grade_level, section, specialization, department } = req.body;
+    const role = req.body.role?.toLowerCase().trim(); // normalize here
+
+    if (!firstname || !lastname || !email || !password || !role) {
+      return res.status(400).json({ message: 'firstname, lastname, email, password, and role are required.' });
     }
 
-    if (!['Student', 'Teacher'].includes(role)) {
-      return res.status(400).json({ message: 'Role must be Student or Teacher.' });
+    if (!['student', 'teacher'].includes(role)) {
+      return res.status(400).json({ message: 'Role must be student or teacher.' });
     }
 
-    // Check if email already exists
-    const [existing] = await db.query('SELECT user_id FROM users WHERE email = ?', [email]);
+    const [existing] = await conn.query('SELECT user_id FROM users WHERE email = ?', [email]);
     if (existing.length > 0) {
-      return res.status(409).json({ message: 'Email is already registered.' });
+      return res.status(409).json({ message: 'Email already registered.' });
     }
 
-    // Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // Insert user
-    const [result] = await db.query(
-      `INSERT INTO users (firstname, lastname, email, password, role)
-       VALUES (?, ?, ?, ?, ?)`,
-      [firstname, lastname || '', email, hashedPassword, role]
+    const [userResult] = await conn.query(
+      `INSERT INTO users (firstname, lastname, email, password, role) VALUES (?, ?, ?, ?, ?)`,
+      [firstname, lastname, email, hashedPassword, role] // role is now always lowercase
     );
+    const user_id = userResult.insertId;
 
-    const userId = result.insertId;
-
-    // Create role-specific record
-    if (role === 'Teacher') {
-      const { specialization, department } = req.body;
-      await db.query(
-        `INSERT INTO teachers (user_id, specialization, department) VALUES (?, ?, ?)`,
-        [userId, specialization || null, department || null]
-      );
-    } else if (role === 'Student') {
-      const { grade_level, section } = req.body;
-      await db.query(
+    if (role === 'student') {
+      await conn.query(
         `INSERT INTO students (user_id, grade_level, section) VALUES (?, ?, ?)`,
-        [userId, grade_level || null, section || null]
+        [user_id, grade_level || null, section || null]
+      );
+    } else if (role === 'teacher') {
+      await conn.query(
+        `INSERT INTO teachers (user_id, specialization, department) VALUES (?, ?, ?)`,
+        [user_id, specialization || null, department || null]
       );
     }
 
-    return res.status(201).json({
-      message: 'Registration successful.',
-      user: { user_id: userId, firstname, lastname, email, role },
-    });
+    await conn.commit();
+    return res.status(201).json({ message: 'Account created successfully.' });
+
   } catch (error) {
+    await conn.rollback();
     console.error('Register error:', error);
     return res.status(500).json({ message: 'Server error during registration.' });
+  } finally {
+    conn.release();
   }
 };
 
@@ -70,7 +65,6 @@ const login = async (req, res) => {
       return res.status(400).json({ message: 'Email and password are required.' });
     }
 
-    // Find user
     const [rows] = await db.query('SELECT * FROM users WHERE email = ?', [email]);
     if (rows.length === 0) {
       return res.status(401).json({ message: 'Invalid email or password.' });
@@ -78,30 +72,41 @@ const login = async (req, res) => {
 
     const user = rows[0];
 
-    // Compare password
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
       return res.status(401).json({ message: 'Invalid email or password.' });
     }
 
-    // Generate JWT
+    const role = user.role?.toLowerCase().trim(); // normalize from DB too
+
+    let role_id = null;
+    if (role === 'student') {
+      const [s] = await db.query('SELECT student_id FROM students WHERE user_id = ?', [user.user_id]);
+      role_id = s[0]?.student_id || null;
+    } else if (role === 'teacher') {
+      const [t] = await db.query('SELECT teacher_id FROM teachers WHERE user_id = ?', [user.user_id]);
+      role_id = t[0]?.teacher_id || null;
+    }
+
     const token = jwt.sign(
-      { user_id: user.user_id, email: user.email, role: user.role },
-      JWT_SECRET,
-      { expiresIn: '1d' }
+      { user_id: user.user_id, role, role_id }, // always lowercase in token
+      process.env.JWT_SECRET,
+      { expiresIn: '7d' }
     );
 
     return res.status(200).json({
       message: 'Login successful.',
       token,
       user: {
-        user_id: user.user_id,
+        user_id:   user.user_id,
+        role_id,
         firstname: user.firstname,
-        lastname: user.lastname,
-        email: user.email,
-        role: user.role,
+        lastname:  user.lastname,
+        email:     user.email,
+        role,
       },
     });
+
   } catch (error) {
     console.error('Login error:', error);
     return res.status(500).json({ message: 'Server error during login.' });

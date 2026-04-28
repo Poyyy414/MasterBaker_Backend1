@@ -1,6 +1,9 @@
 const express = require('express');
 const router  = express.Router();
 
+const { verifyToken, isStudent } = require('../middleware/authMiddleware');
+const auth = [verifyToken, isStudent];
+
 const {
   getAllStudents,
   getStudentById,
@@ -10,30 +13,35 @@ const {
 
 const {
   getActivitiesByPath,
-  submitCheckpoint,
-  saveVideoProgress,
-  getStudentProgress,
+  getActivityById,
 } = require('../controllers/activityController');
 
-const { verifyToken, isStudent } = require('../middleware/authMiddleware'); 
+const {
+  getCheckpointsByActivity,
+  getCheckpointById,
+  submitCheckpoint,
+} = require('../controllers/checkpointController');
+
+const {
+  getQuestionsByCheckpoint,
+} = require('../controllers/questionController');
 
 // ── Student profile ───────────────────────────────────────────────────────────
-router.get   ('/',    getAllStudents);       // GET    /api/student
-router.get   ('/:id', getStudentById);      // GET    /api/student/:id
-router.put   ('/:id', updateStudent);       // PUT    /api/student/:id
-router.delete('/:id', deleteStudent);       // DELETE /api/student/:id
+router.get   ('/',    auth, getAllStudents);
+router.get   ('/:id', auth, getStudentById);
+router.put   ('/:id', auth, updateStudent);
+router.delete('/:id', auth, deleteStudent);
 
-// ── Browse activities ─────────────────────────────────────────────────────────
-router.get('/activities/path/:path_id', getActivitiesByPath); // GET /api/student/activities/path/:path_id
+// ── Browse & view activities ──────────────────────────────────────────────────
+router.get('/activities/path/:path_id', auth, getActivitiesByPath);
+router.get('/activities/:id',           auth, getActivityById);
 
-// ── Checkpoint submission ─────────────────────────────────────────────────────
-router.post('/checkpoint/:checkpoint_id/submit', submitCheckpoint); // POST /api/student/checkpoint/:checkpoint_id/submit
+// ── Checkpoints ───────────────────────────────────────────────────────────────
+router.get ('/activities/:activity_id/checkpoints',   auth, getCheckpointsByActivity);
+router.get ('/checkpoints/:checkpoint_id',            auth, getCheckpointById);
+router.post('/checkpoints/:checkpoint_id/submit',     auth, submitCheckpoint);
 
-// ── Video progress ────────────────────────────────────────────────────────────
-router.post('/video/progress', saveVideoProgress); // POST /api/student/video/progress
+// ── Questions ─────────────────────────────────────────────────────────────────
+router.get('/checkpoints/:checkpoint_id/questions',   auth, getQuestionsByCheckpoint);
 
-// ── My progress ───────────────────────────────────────────────────────────────
-router.get('/progress/:student_id', getStudentProgress); // GET /api/student/progress/:student_id
-
-router.use(verifyToken, isStudent);
 module.exports = router;
