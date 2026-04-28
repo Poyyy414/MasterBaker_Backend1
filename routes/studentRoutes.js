@@ -15,6 +15,8 @@ const {
   getStudentProgress,
 } = require('../controllers/activityController');
 
+const { verifyToken, isStudent } = require('../middleware/authMiddleware'); 
+
 // ── Student profile ───────────────────────────────────────────────────────────
 router.get   ('/',    getAllStudents);       // GET    /api/student
 router.get   ('/:id', getStudentById);      // GET    /api/student/:id
@@ -33,4 +35,5 @@ router.post('/video/progress', saveVideoProgress); // POST /api/student/video/pr
 // ── My progress ───────────────────────────────────────────────────────────────
 router.get('/progress/:student_id', getStudentProgress); // GET /api/student/progress/:student_id
 
+router.use(verifyToken, isStudent);
 module.exports = router;

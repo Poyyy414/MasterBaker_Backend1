@@ -1,8 +1,10 @@
+require('dotenv').config(); //
 const express = require('express');
 const cors    = require('cors');
 
-const teacherRoutes = require('./routes/teacher.routes');
-const studentRoutes = require('./routes/student.routes');
+const teacherRoutes = require('./routes/teacherRoutes');
+const studentRoutes = require('./routes/studentRoutes');
+const uploadRoutes  = require('./routes/uploadRoutes');
 
 const app = express();
 
@@ -13,6 +15,7 @@ app.use(express.json());
 // ── Routes ────────────────────────────────────────────────────────────────────
 app.use('/api/teacher', teacherRoutes);
 app.use('/api/student', studentRoutes);
+app.use('/api/upload', uploadRoutes);
 
 // ── 404 ───────────────────────────────────────────────────────────────────────
 app.use((req, res) => {
