@@ -14,6 +14,9 @@ const {
 const {
   getActivitiesByPath,
   getActivityById,
+  getVideosByActivity,
+  getVideoById,
+  getActivityLearnView,
 } = require('../controllers/activityController');
 
 const {
@@ -32,9 +35,14 @@ router.get   ('/:id', auth, getStudentById);
 router.put   ('/:id', auth, updateStudent);
 router.delete('/:id', auth, deleteStudent);
 
-// ── Browse & view activities ──────────────────────────────────────────────────
-router.get('/activities/path/:path_id', auth, getActivitiesByPath);
-router.get('/activities/:id',           auth, getActivityById);
+// ── Browse activities ─────────────────────────────────────────────────────────
+router.get('/activities/path/:path_id',           auth, getActivitiesByPath);
+router.get('/activities/:id',                     auth, getActivityById);
+router.get('/activities/:id/learn',               auth, getActivityLearnView);
+router.get('/activities/:id/videos',              auth, getVideosByActivity);
+
+// ── Single video ──────────────────────────────────────────────────────────────
+router.get('/videos/:video_id',                   auth, getVideoById);
 
 // ── Checkpoints ───────────────────────────────────────────────────────────────
 router.get ('/activities/:activity_id/checkpoints',   auth, getCheckpointsByActivity);

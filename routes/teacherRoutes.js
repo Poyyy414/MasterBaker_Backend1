@@ -2,7 +2,7 @@ const express = require('express');
 const router  = express.Router();
 
 const { verifyToken, isTeacher } = require('../middleware/authMiddleware');
-const auth = [verifyToken, isTeacher]; // reusable array
+const auth = [verifyToken, isTeacher];
 
 const {
   getAllTeachers,
@@ -17,6 +17,8 @@ const {
   getActivityById,
   updateActivity,
   deleteActivity,
+  createVideo,
+  deleteVideo,
 } = require('../controllers/activityController');
 
 const {
@@ -37,11 +39,15 @@ router.put   ('/:id', auth, updateTeacher);
 router.delete('/:id', auth, deleteTeacher);
 
 // ── Activity management ───────────────────────────────────────────────────────
-router.post  ('/activities',     auth, createActivity);
-router.get   ('/activities',     auth, getAllActivities);
-router.get   ('/activities/:id', auth, getActivityById);
-router.put   ('/activities/:id', auth, updateActivity);
-router.delete('/activities/:id', auth, deleteActivity);
+router.post  ('/activities',                          auth, createActivity);
+router.get   ('/activities',                          auth, getAllActivities);
+router.get   ('/activities/:id',                      auth, getActivityById);
+router.put   ('/activities/:id',                      auth, updateActivity);
+router.delete('/activities/:id',                      auth, deleteActivity);
+
+// ── Video management ──────────────────────────────────────────────────────────
+router.post  ('/activities/:id/videos',               auth, createVideo);
+router.delete('/videos/:video_id',                    auth, deleteVideo);
 
 // ── Checkpoint management ─────────────────────────────────────────────────────
 router.post  ('/activities/:activity_id/checkpoints', auth, createCheckpoint);
