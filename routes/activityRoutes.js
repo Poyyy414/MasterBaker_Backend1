@@ -1,5 +1,6 @@
 const express  = require('express');
 const router   = express.Router();
+
 const {
   createActivity,
   getAllActivities,
@@ -14,16 +15,16 @@ const {
   getCheckpointsByActivity,
 } = require('../controllers/checkpointController');
 
-// ── Activity CRUD ─────────────────────────────────────────────────────────────
-router.post  ('/',                  createActivity);      // POST   /api/activities
-router.get   ('/',                  getAllActivities);     // GET    /api/activities
-router.get   ('/path/:path_id',     getActivitiesByPath); // GET    /api/activities/path/:path_id
-router.get   ('/:id',              getActivityById);      // GET    /api/activities/:id
-router.put   ('/:id',              updateActivity);       // PUT    /api/activities/:id
-router.delete('/:id',              deleteActivity);       // DELETE /api/activities/:id
+// ── Specific routes BEFORE /:id ───────────────────────────────────────────────
+router.post  ('/',                              createActivity);
+router.get   ('/',                              getAllActivities);
+router.get   ('/path/:path_id',                 getActivitiesByPath);
+router.post  ('/:activity_id/checkpoints',      createCheckpoint);
+router.get   ('/:activity_id/checkpoints',      getCheckpointsByActivity);
 
-// ── Checkpoints nested under activity ────────────────────────────────────────
-router.post  ('/:activity_id/checkpoints', createCheckpoint);         // POST /api/activities/:activity_id/checkpoints
-router.get   ('/:activity_id/checkpoints', getCheckpointsByActivity); // GET  /api/activities/:activity_id/checkpoints
+// ── Wildcard /:id LAST ────────────────────────────────────────────────────────
+router.get   ('/:id',                           getActivityById);
+router.put   ('/:id',                           updateActivity);
+router.delete('/:id',                           deleteActivity);
 
 module.exports = router;

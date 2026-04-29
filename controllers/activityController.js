@@ -165,15 +165,10 @@ const deleteActivity = async (req, res) => {
   }
 };
 
-// ════════════════════════════════════════════════════════════════════════════════
-// CREATE VIDEO
-// POST /api/teacher/activities/:id/videos
-// Body: { video_url, title, order_index }
-// ════════════════════════════════════════════════════════════════════════════════
 const createVideo = async (req, res) => {
   try {
     const { id } = req.params;
-    const { video_url, title, order_index = 0 } = req.body;
+    const { video_url, label, duration, order_index = 0 } = req.body; // title → label
 
     if (!video_url) {
       return res.status(400).json({ message: 'video_url is required.' });
@@ -187,8 +182,9 @@ const createVideo = async (req, res) => {
     }
 
     const [result] = await db.query(
-      `INSERT INTO activity_videos (activity_id, video_url, title, order_index) VALUES (?, ?, ?, ?)`,
-      [id, video_url, title || null, order_index]
+      `INSERT INTO activity_videos (activity_id, video_url, label, duration, order_index) 
+       VALUES (?, ?, ?, ?, ?)`,
+      [id, video_url, label || null, duration || null, order_index]
     );
 
     return res.status(201).json({
@@ -196,8 +192,8 @@ const createVideo = async (req, res) => {
       video_id: result.insertId,
     });
   } catch (error) {
-    console.error('Create video error:', error);
-    return res.status(500).json({ message: 'Server error.' });
+    console.error('Create video error:', error.message);
+    return res.status(500).json({ message: error.message });
   }
 };
 

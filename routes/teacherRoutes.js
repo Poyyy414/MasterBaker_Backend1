@@ -32,30 +32,30 @@ const {
   deleteQuestion,
 } = require('../controllers/questionController');
 
-// ── Teacher profile ───────────────────────────────────────────────────────────
-router.get   ('/',    auth, getAllTeachers);
-router.get   ('/:id', auth, getTeacherById);
-router.put   ('/:id', auth, updateTeacher);
-router.delete('/:id', auth, deleteTeacher);
-
-// ── Activity management ───────────────────────────────────────────────────────
-router.post  ('/activities',                          auth, createActivity);
-router.get   ('/activities',                          auth, getAllActivities);
-router.get   ('/activities/:id',                      auth, getActivityById);
-router.put   ('/activities/:id',                      auth, updateActivity);
-router.delete('/activities/:id',                      auth, deleteActivity);
+// ── Activity management (BEFORE /:id) ────────────────────────────────────────
+router.post  ('/activities',                           auth, createActivity);
+router.get   ('/activities',                           auth, getAllActivities);
+router.get   ('/activities/:id',                       auth, getActivityById);
+router.put   ('/activities/:id',                       auth, updateActivity);
+router.delete('/activities/:id',                       auth, deleteActivity);
 
 // ── Video management ──────────────────────────────────────────────────────────
-router.post  ('/activities/:id/videos',               auth, createVideo);
-router.delete('/videos/:video_id',                    auth, deleteVideo);
+router.post  ('/activities/:id/videos',                auth, createVideo);
+router.delete('/videos/:video_id',                     auth, deleteVideo);
 
 // ── Checkpoint management ─────────────────────────────────────────────────────
-router.post  ('/activities/:activity_id/checkpoints', auth, createCheckpoint);
-router.put   ('/checkpoints/:checkpoint_id',          auth, updateCheckpoint);
-router.delete('/checkpoints/:checkpoint_id',          auth, deleteCheckpoint);
+router.post  ('/activities/:activity_id/checkpoints',  auth, createCheckpoint);
+router.put   ('/checkpoints/:checkpoint_id',           auth, updateCheckpoint);
+router.delete('/checkpoints/:checkpoint_id',           auth, deleteCheckpoint);
 
 // ── Question management ───────────────────────────────────────────────────────
 router.post  ('/checkpoints/:checkpoint_id/questions', auth, createQuestion);
 router.delete('/questions/:question_id',               auth, deleteQuestion);
+
+// ── Teacher profile (/:id MUST be last) ──────────────────────────────────────
+router.get   ('/',    auth, getAllTeachers);
+router.get   ('/:id', auth, getTeacherById);
+router.put   ('/:id', auth, updateTeacher);
+router.delete('/:id', auth, deleteTeacher);
 
 module.exports = router;
