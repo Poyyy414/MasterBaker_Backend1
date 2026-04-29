@@ -1,27 +1,35 @@
 const db = require('../config/db');
 
 // ════════════════════════════════════════════════════════════════════════════════
-// GET SEQUENCE STEPS BY RECIPE (shuffled for student, ordered for teacher)
-// GET /api/teacher/recipes/:recipe_id/sequence-steps
-// GET /api/student/recipes/:recipe_id/sequence-steps
+// GET SEQUENCE STEPS (student — shuffled, no correct_order)
+// GET /api/student/games/:game_id/sequence
 // ════════════════════════════════════════════════════════════════════════════════
 const getSequenceSteps = async (req, res) => {
   try {
-    const { recipe_id } = req.params;
-    const isTeacher     = req.user?.role === 'teacher';
+    const { game_id } = req.params;
 
-    const orderBy = isTeacher ? 'correct_order' : 'RAND()';
+    const [game] = await db.query(
+      `SELECT game_id, title, description, time_limit FROM games WHERE game_id = ?`, [game_id]
+    );
+    if (game.length === 0) {
+      return res.status(404).json({ message: 'Game not found.' });
+    }
 
-    const [rows] = await db.query(
-      `SELECT step_id, recipe_id, description, image_url
-       ${isTeacher ? ', correct_order' : ''}
+    const [steps] = await db.query(
+      `SELECT step_id, step_text, step_image, question_text
        FROM game_sequence_steps
-       WHERE recipe_id = ?
-       ORDER BY ${orderBy}`,
-      [recipe_id]
+       WHERE game_id = ?
+       ORDER BY RAND()`,
+      [game_id]
     );
 
-    return res.status(200).json(rows);
+    return res.status(200).json({
+      game_id:    game[0].game_id,
+      title:      game[0].title,
+      time_limit: game[0].time_limit,
+      question:   steps[0]?.question_text || 'Arrange the steps in the correct order.',
+      steps,  // no correct_order sent to student
+    });
   } catch (error) {
     console.error('Get sequence steps error:', error);
     return res.status(500).json({ message: 'Server error.' });
@@ -29,23 +37,64 @@ const getSequenceSteps = async (req, res) => {
 };
 
 // ════════════════════════════════════════════════════════════════════════════════
-// CREATE SEQUENCE STEP
-// POST /api/teacher/recipes/:recipe_id/sequence-steps
-// Body: { description, image_url, correct_order }
+// GET SEQUENCE STEPS (teacher — ordered, with correct_order)
+// GET /api/teacher/games/:game_id/sequence
+// ════════════════════════════════════════════════════════════════════════════════
+const getSequenceStepsTeacher = async (req, res) => {
+  try {
+    const { game_id } = req.params;
+
+    const [game] = await db.query(
+      `SELECT game_id, title FROM games WHERE game_id = ?`, [game_id]
+    );
+    if (game.length === 0) {
+      return res.status(404).json({ message: 'Game not found.' });
+    }
+
+    const [steps] = await db.query(
+      `SELECT step_id, game_id, question_text, step_text, step_image, correct_order
+       FROM game_sequence_steps
+       WHERE game_id = ?
+       ORDER BY correct_order`,
+      [game_id]
+    );
+
+    return res.status(200).json({
+      game_id: game[0].game_id,
+      title:   game[0].title,
+      steps,
+    });
+  } catch (error) {
+    console.error('Get sequence steps teacher error:', error);
+    return res.status(500).json({ message: 'Server error.' });
+  }
+};
+
+// ════════════════════════════════════════════════════════════════════════════════
+// CREATE SEQUENCE STEP (teacher)
+// POST /api/teacher/games/:game_id/sequence
+// Body: { question_text, step_text, step_image, correct_order }
 // ════════════════════════════════════════════════════════════════════════════════
 const createSequenceStep = async (req, res) => {
   try {
-    const { recipe_id }                    = req.params;
-    const { description, image_url, correct_order } = req.body;
+    const { game_id } = req.params;
+    const { question_text, step_text, step_image, correct_order } = req.body;
 
-    if (!description || correct_order == null) {
-      return res.status(400).json({ message: 'description and correct_order are required.' });
+    if (!step_text || correct_order == null) {
+      return res.status(400).json({ message: 'step_text and correct_order are required.' });
+    }
+
+    const [game] = await db.query(
+      `SELECT game_id FROM games WHERE game_id = ?`, [game_id]
+    );
+    if (game.length === 0) {
+      return res.status(404).json({ message: 'Game not found.' });
     }
 
     const [result] = await db.query(
-      `INSERT INTO game_sequence_steps (recipe_id, description, image_url, correct_order)
-       VALUES (?, ?, ?, ?)`,
-      [recipe_id, description, image_url || null, correct_order]
+      `INSERT INTO game_sequence_steps (game_id, question_text, step_text, step_image, correct_order)
+       VALUES (?, ?, ?, ?, ?)`,
+      [game_id, question_text || null, step_text, step_image || null, correct_order]
     );
 
     return res.status(201).json({
@@ -59,13 +108,13 @@ const createSequenceStep = async (req, res) => {
 };
 
 // ════════════════════════════════════════════════════════════════════════════════
-// UPDATE SEQUENCE STEP
+// UPDATE SEQUENCE STEP (teacher)
 // PUT /api/teacher/sequence-steps/:step_id
 // ════════════════════════════════════════════════════════════════════════════════
 const updateSequenceStep = async (req, res) => {
   try {
-    const { step_id }                               = req.params;
-    const { description, image_url, correct_order } = req.body;
+    const { step_id } = req.params;
+    const { question_text, step_text, step_image, correct_order } = req.body;
 
     const [existing] = await db.query(
       `SELECT step_id FROM game_sequence_steps WHERE step_id = ?`, [step_id]
@@ -76,11 +125,13 @@ const updateSequenceStep = async (req, res) => {
 
     await db.query(
       `UPDATE game_sequence_steps SET
-        description   = COALESCE(?, description),
-        image_url     = COALESCE(?, image_url),
+        question_text = COALESCE(?, question_text),
+        step_text     = COALESCE(?, step_text),
+        step_image    = COALESCE(?, step_image),
         correct_order = COALESCE(?, correct_order)
        WHERE step_id = ?`,
-      [description || null, image_url || null, correct_order ?? null, step_id]
+      [question_text || null, step_text || null, step_image || null,
+       correct_order ?? null, step_id]
     );
 
     return res.status(200).json({ message: 'Sequence step updated.' });
@@ -91,7 +142,7 @@ const updateSequenceStep = async (req, res) => {
 };
 
 // ════════════════════════════════════════════════════════════════════════════════
-// DELETE SEQUENCE STEP
+// DELETE SEQUENCE STEP (teacher)
 // DELETE /api/teacher/sequence-steps/:step_id
 // ════════════════════════════════════════════════════════════════════════════════
 const deleteSequenceStep = async (req, res) => {
@@ -114,22 +165,25 @@ const deleteSequenceStep = async (req, res) => {
 };
 
 // ════════════════════════════════════════════════════════════════════════════════
-// CHECK STUDENT SEQUENCE — Tag the Sequence
-// POST /api/student/recipes/:recipe_id/sequence-steps/check
+// SUBMIT SEQUENCE (student)
+// POST /api/student/games/:game_id/sequence/submit
 // Body: { user_sequence: [{ step_id, user_order }] }
 // ════════════════════════════════════════════════════════════════════════════════
 const checkSequence = async (req, res) => {
   try {
-    const { recipe_id }   = req.params;
+    const { game_id }     = req.params;
+    const student_id      = req.user.role_id;
     const { user_sequence } = req.body;
 
-    if (!Array.isArray(user_sequence)) {
-      return res.status(400).json({ message: 'user_sequence must be an array.' });
+    if (!Array.isArray(user_sequence) || user_sequence.length === 0) {
+      return res.status(400).json({ message: 'user_sequence must be a non-empty array.' });
     }
 
     const [steps] = await db.query(
-      `SELECT step_id, correct_order FROM game_sequence_steps WHERE recipe_id = ?`,
-      [recipe_id]
+      `SELECT step_id, step_text, correct_order
+       FROM game_sequence_steps
+       WHERE game_id = ?`,
+      [game_id]
     );
 
     const correctMap = {};
@@ -139,16 +193,31 @@ const checkSequence = async (req, res) => {
     const results = user_sequence.map(({ step_id, user_order }) => {
       const is_correct = correctMap[step_id] === user_order;
       if (is_correct) correctCount++;
-      return { step_id, user_order, correct_order: correctMap[step_id], is_correct };
+      return {
+        step_id,
+        user_order,
+        correct_order: correctMap[step_id],
+        is_correct,
+      };
     });
 
-    const total        = steps.length;
-    const points       = Math.round((correctCount / total) * 100);
+    const total      = steps.length;
+    const percentage = total > 0 ? Math.round((correctCount / total) * 100) : 0;
+    const passed     = percentage >= 60;
+
+    // save session
+    await db.query(
+      `INSERT INTO game_sessions (game_id, student_id, score, total, completed, ended_at)
+       VALUES (?, ?, ?, ?, 1, NOW())`,
+      [game_id, student_id, correctCount, total]
+    );
 
     return res.status(200).json({
-      score:         correctCount,
-      total_items:   total,
-      points_earned: points,
+      message:    'Sequence submitted.',
+      score:      correctCount,
+      total,
+      percentage,
+      passed,
       results,
     });
   } catch (error) {
@@ -159,6 +228,7 @@ const checkSequence = async (req, res) => {
 
 module.exports = {
   getSequenceSteps,
+  getSequenceStepsTeacher,
   createSequenceStep,
   updateSequenceStep,
   deleteSequenceStep,

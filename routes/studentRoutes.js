@@ -38,8 +38,8 @@ const {
 } = require('../controllers/differenceController');
 
 const {
-  getGameItems,
-  checkGameItems,
+  getPickIngredientGame,
+  submitPickIngredient,
 } = require('../controllers/gameItemsController');
 
 const {
@@ -56,13 +56,13 @@ const {
 } = require('../controllers/gamificationController');
 
 // ── Activities ────────────────────────────────────────────────────────────────
-router.get('/activities/path/:path_id',               auth, getActivitiesByPath);
-router.get('/activities/:id/learn',                   auth, getActivityLearnView);
-router.get('/activities/:id/videos',                  auth, getVideosByActivity);
-router.get('/activities/:id/checkpoints',             auth, getCheckpointsByActivity);
-router.get('/activities/:activity_id/progress',       auth, getActivityProgress);
-router.get('/activities/:activity_id/next-question',  auth, getNextQuestion);
-router.get('/activities/:id',                         auth, getActivityById);
+router.get ('/activities/path/:path_id',              auth, getActivitiesByPath);
+router.get ('/activities/:id/learn',                  auth, getActivityLearnView);
+router.get ('/activities/:id/videos',                 auth, getVideosByActivity);
+router.get ('/activities/:id/checkpoints',            auth, getCheckpointsByActivity);
+router.get ('/activities/:activity_id/progress',      auth, getActivityProgress);
+router.get ('/activities/:activity_id/next-question', auth, getNextQuestion);
+router.get ('/activities/:id',                        auth, getActivityById);
 router.post('/activities/:activity_id/end',           auth, endActivity);
 
 // ── Videos ────────────────────────────────────────────────────────────────────
@@ -74,16 +74,16 @@ router.get ('/checkpoints/:checkpoint_id',            auth, getCheckpointById);
 router.post('/checkpoints/:checkpoint_id/submit',     auth, submitCheckpoint);
 
 // ── Spot the Difference ───────────────────────────────────────────────────────
-router.get ('/recipes/:recipe_id/difference',         auth, getDifferenceGame);
-router.post('/difference/:image_id/check',            auth, checkDifferenceSpots);
+router.get ('/games/:game_id/difference',             auth, getDifferenceGame);
+router.post('/games/:game_id/difference/check',       auth, checkDifferenceSpots);
 
 // ── Pick the Right Ingredient ─────────────────────────────────────────────────
-router.get ('/recipes/:recipe_id/game-items',         auth, getGameItems);
-router.post('/recipes/:recipe_id/game-items/check',   auth, checkGameItems);
+router.get ('/games/:game_id/pick-ingredient',        auth, getPickIngredientGame);  
+router.post('/games/:game_id/pick-ingredient/submit', auth, submitPickIngredient);   
 
 // ── Tag the Sequence ──────────────────────────────────────────────────────────
-router.get ('/recipes/:recipe_id/sequence-steps',       auth, getSequenceSteps);
-router.post('/recipes/:recipe_id/sequence-steps/check', auth, checkSequence);
+router.get ('/games/:game_id/sequence',               auth, getSequenceSteps);
+router.post('/games/:game_id/sequence/submit',        auth, checkSequence);
 
 // ── Game Sessions, Points, Badges, Leaderboard ───────────────────────────────
 router.post('/game-sessions',                         auth, createGameSession);
