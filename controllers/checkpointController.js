@@ -3,14 +3,12 @@ const db = require('../config/db');
 // ════════════════════════════════════════════════════════════════════════════════
 // CREATE CHECKPOINT
 // POST /api/activities/:activity_id/checkpoints
-// Body: { title, order_index }
 // ════════════════════════════════════════════════════════════════════════════════
 const createCheckpoint = async (req, res) => {
   try {
     const { activity_id } = req.params;
     const { title, order_index = 0 } = req.body;
 
-    // Verify activity exists
     const [activity] = await db.query(
       `SELECT activity_id FROM activities WHERE activity_id = ?`, [activity_id]
     );
@@ -39,11 +37,12 @@ const createCheckpoint = async (req, res) => {
 // ════════════════════════════════════════════════════════════════════════════════
 const getCheckpointsByActivity = async (req, res) => {
   try {
-    const { activity_id } = req.params;
+    const { id, activity_id } = req.params;
+    const aid = activity_id || id;
 
     const [checkpoints] = await db.query(
       `SELECT * FROM checkpoints WHERE activity_id = ? ORDER BY order_index`,
-      [activity_id]
+      [aid]
     );
 
     return res.status(200).json(checkpoints);
@@ -78,7 +77,6 @@ const getCheckpointById = async (req, res) => {
 // ════════════════════════════════════════════════════════════════════════════════
 // UPDATE CHECKPOINT
 // PUT /api/checkpoints/:checkpoint_id
-// Body: { title, order_index }
 // ════════════════════════════════════════════════════════════════════════════════
 const updateCheckpoint = async (req, res) => {
   try {
@@ -133,8 +131,6 @@ const deleteCheckpoint = async (req, res) => {
 // ════════════════════════════════════════════════════════════════════════════════
 // SUBMIT CHECKPOINT ANSWERS + AUTO SCORE
 // POST /api/checkpoints/:checkpoint_id/submit
-// Body: { student_id, activity_id, answers: [{ question_id, given_answer }] }
-// matching_type answer format → "Flour:Structure,Butter:Flakiness,Salt:Flavor"
 // ════════════════════════════════════════════════════════════════════════════════
 const submitCheckpoint = async (req, res) => {
   const conn = await db.getConnection();
@@ -243,6 +239,192 @@ const submitCheckpoint = async (req, res) => {
   }
 };
 
+// ════════════════════════════════════════════════════════════════════════════════
+// GET ACTIVITY PROGRESS (for a student)
+// GET /api/student/activities/:activity_id/progress
+// ════════════════════════════════════════════════════════════════════════════════
+const getActivityProgress = async (req, res) => {
+  try {
+    const { activity_id } = req.params;
+    const student_id = req.user?.student_id || req.user?.id;
+
+    if (!student_id) {
+      return res.status(401).json({ message: 'Unauthorized.' });
+    }
+
+    // Get all checkpoints for this activity
+    const [checkpoints] = await db.query(
+      `SELECT checkpoint_id, title, order_index FROM checkpoints WHERE activity_id = ? ORDER BY order_index`,
+      [activity_id]
+    );
+
+    // Get progress records for this student + activity
+    const [progress] = await db.query(
+      `SELECT checkpoint_id, score, updated_at
+       FROM student_progress
+       WHERE student_id = ? AND activity_id = ?`,
+      [student_id, activity_id]
+    );
+
+    const progressMap = {};
+    progress.forEach(p => { progressMap[p.checkpoint_id] = p; });
+
+    const checkpointsWithProgress = checkpoints.map(cp => ({
+      ...cp,
+      completed: !!progressMap[cp.checkpoint_id],
+      score: progressMap[cp.checkpoint_id]?.score ?? null,
+      completed_at: progressMap[cp.checkpoint_id]?.updated_at ?? null,
+    }));
+
+    const completedCount = checkpointsWithProgress.filter(cp => cp.completed).length;
+
+    return res.status(200).json({
+      activity_id: parseInt(activity_id),
+      student_id,
+      total_checkpoints: checkpoints.length,
+      completed_checkpoints: completedCount,
+      percent_complete: checkpoints.length > 0
+        ? Math.round((completedCount / checkpoints.length) * 100)
+        : 0,
+      checkpoints: checkpointsWithProgress,
+    });
+  } catch (error) {
+    console.error('Get activity progress error:', error);
+    return res.status(500).json({ message: 'Server error.' });
+  }
+};
+
+// ════════════════════════════════════════════════════════════════════════════════
+// END ACTIVITY
+// POST /api/student/activities/:activity_id/end
+// ════════════════════════════════════════════════════════════════════════════════
+const endActivity = async (req, res) => {
+  try {
+    const { activity_id } = req.params;
+    const student_id = req.user?.student_id || req.user?.id;
+
+    if (!student_id) {
+      return res.status(401).json({ message: 'Unauthorized.' });
+    }
+
+    // Get total score across all checkpoints for this activity
+    const [progressRows] = await db.query(
+      `SELECT SUM(score) AS total_score, COUNT(*) AS checkpoints_done
+       FROM student_progress
+       WHERE student_id = ? AND activity_id = ?`,
+      [student_id, activity_id]
+    );
+
+    const totalScore = progressRows[0]?.total_score ?? 0;
+
+    // Mark activity as completed (upsert)
+    await db.query(
+      `INSERT INTO student_activity_completion (student_id, activity_id, total_score, completed_at)
+       VALUES (?, ?, ?, NOW())
+       ON DUPLICATE KEY UPDATE total_score = VALUES(total_score), completed_at = NOW()`,
+      [student_id, activity_id, totalScore]
+    );
+
+    return res.status(200).json({
+      message: 'Activity completed.',
+      activity_id: parseInt(activity_id),
+      student_id,
+      total_score: totalScore,
+    });
+  } catch (error) {
+    console.error('End activity error:', error);
+    return res.status(500).json({ message: 'Server error.' });
+  }
+};
+
+// ════════════════════════════════════════════════════════════════════════════════
+// GET NEXT QUESTION
+// GET /api/student/activities/:activity_id/next-question
+// Returns the next unanswered question for the student in this activity
+// ════════════════════════════════════════════════════════════════════════════════
+const getNextQuestion = async (req, res) => {
+  try {
+    const { activity_id } = req.params;
+    const student_id = req.user?.student_id || req.user?.id;
+
+    if (!student_id) {
+      return res.status(401).json({ message: 'Unauthorized.' });
+    }
+
+    // Get all questions for this activity (ordered by checkpoint then question order)
+    const [questions] = await db.query(
+      `SELECT q.question_id, q.question_text, q.question_type, q.checkpoint_id,
+              c.order_index AS checkpoint_order, q.order_index AS question_order
+       FROM questions q
+       JOIN checkpoints c ON q.checkpoint_id = c.checkpoint_id
+       WHERE c.activity_id = ?
+       ORDER BY c.order_index, q.order_index`,
+      [activity_id]
+    );
+
+    if (questions.length === 0) {
+      return res.status(404).json({ message: 'No questions found for this activity.' });
+    }
+
+    // Get already-answered question IDs for this student
+    const questionIds = questions.map(q => q.question_id);
+    const [answered] = await db.query(
+      `SELECT question_id FROM student_answers WHERE student_id = ? AND question_id IN (?)`,
+      [student_id, questionIds]
+    );
+    const answeredSet = new Set(answered.map(a => a.question_id));
+
+    // Find first unanswered question
+    const nextQuestion = questions.find(q => !answeredSet.has(q.question_id));
+
+    if (!nextQuestion) {
+      return res.status(200).json({
+        message: 'All questions completed.',
+        completed: true,
+        next_question: null,
+      });
+    }
+
+    // Fetch options/pairs depending on type
+    switch (nextQuestion.question_type) {
+      case 'multiple_choice': {
+        const [opts] = await db.query(
+          `SELECT option_id, option_text FROM question_options WHERE question_id = ?`,
+          [nextQuestion.question_id]
+        );
+        nextQuestion.options = opts;
+        break;
+      }
+      case 'true_or_false': {
+        nextQuestion.options = [{ option_text: 'true' }, { option_text: 'false' }];
+        break;
+      }
+      case 'identification': {
+        nextQuestion.options = [];
+        break;
+      }
+      case 'matching_type': {
+        const [pairs] = await db.query(
+          `SELECT pair_id, left_item, right_item FROM question_matching_pairs WHERE question_id = ?`,
+          [nextQuestion.question_id]
+        );
+        nextQuestion.matching_pairs = pairs;
+        break;
+      }
+    }
+
+    return res.status(200).json({
+      completed: false,
+      questions_total: questions.length,
+      questions_answered: answeredSet.size,
+      next_question: nextQuestion,
+    });
+  } catch (error) {
+    console.error('Get next question error:', error);
+    return res.status(500).json({ message: 'Server error.' });
+  }
+};
+
 module.exports = {
   createCheckpoint,
   getCheckpointsByActivity,
@@ -250,4 +432,8 @@ module.exports = {
   updateCheckpoint,
   deleteCheckpoint,
   submitCheckpoint,
+  // ✅ Added missing exports that studentRoutes.js requires:
+  getActivityProgress,
+  endActivity,
+  getNextQuestion,
 };
