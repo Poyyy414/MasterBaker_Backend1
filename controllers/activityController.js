@@ -182,7 +182,7 @@ const createVideo = async (req, res) => {
     }
 
     const [result] = await db.query(
-      `INSERT INTO activity_videos (activity_id, video_url, label, duration, order_index) 
+      `INSERT INTO activity_videos (activity_id, video_url, title, duration, order_index)
        VALUES (?, ?, ?, ?, ?)`,
       [id, video_url, label || null, duration || null, order_index]
     );
