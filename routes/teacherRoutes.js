@@ -19,6 +19,8 @@ const {
   deleteActivity,
   createVideo,
   deleteVideo,
+  getActivitiesByPath,
+  getCheckpointsByActivity,
 } = require('../controllers/activityController');
 
 const {
@@ -62,6 +64,8 @@ router.get   ('/activities',                           auth, getAllActivities);
 router.get   ('/activities/:id',                       auth, getActivityById);
 router.put   ('/activities/:id',                       auth, updateActivity);
 router.delete('/activities/:id',                       auth, deleteActivity);
+router.get   ('/activities/path/:path_id',              auth, getActivitiesByPath); // ← fixed
+router.get   ('/activities/:id/checkpoints',            auth, getCheckpointsByActivity);
 
 // ── Video management ──────────────────────────────────────────────────────────
 router.post  ('/activities/:id/videos',                auth, createVideo);

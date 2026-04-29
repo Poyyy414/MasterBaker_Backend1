@@ -351,6 +351,83 @@ const getActivityLearnView = async (req, res) => {
   }
 };
 
+// ════════════════════════════════════════════════════════════════════════════════
+// GET CHECKPOINTS BY ACTIVITY
+// GET /api/teacher/activities/:id/checkpoints
+// ════════════════════════════════════════════════════════════════════════════════
+const getCheckpointsByActivity = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const [activity] = await db.query(
+      `SELECT activity_id, title FROM activities WHERE activity_id = ?`, [id]
+    );
+    if (activity.length === 0) {
+      return res.status(404).json({ message: 'Activity not found.' });
+    }
+
+    const [checkpoints] = await db.query(
+      `SELECT * FROM checkpoints WHERE activity_id = ? ORDER BY order_index`,
+      [id]
+    );
+
+    for (const cp of checkpoints) {
+      const [questions] = await db.query(
+        `SELECT * FROM questions WHERE checkpoint_id = ? ORDER BY order_index`,
+        [cp.checkpoint_id]
+      );
+
+      for (const q of questions) {
+        switch (q.question_type) {
+          case 'multiple_choice': {
+            const [opts] = await db.query(
+              `SELECT * FROM question_options WHERE question_id = ?`,
+              [q.question_id]
+            );
+            q.options = opts;
+            break;
+          }
+          case 'true_or_false': {
+            const [tf] = await db.query(
+              `SELECT * FROM question_tf_answers WHERE question_id = ?`,
+              [q.question_id]
+            );
+            q.tf_answer = tf[0] || null;
+            break;
+          }
+          case 'identification': {
+            const [ident] = await db.query(
+              `SELECT * FROM question_identification_answers WHERE question_id = ?`,
+              [q.question_id]
+            );
+            q.identification_answer = ident[0] || null;
+            break;
+          }
+          case 'matching_type': {
+            const [pairs] = await db.query(
+              `SELECT * FROM question_matching_pairs WHERE question_id = ?`,
+              [q.question_id]
+            );
+            q.matching_pairs = pairs;
+            break;
+          }
+        }
+      }
+
+      cp.questions = questions;
+    }
+
+    return res.status(200).json({
+      activity_id:    activity[0].activity_id,
+      activity_title: activity[0].title,
+      checkpoints,
+    });
+  } catch (error) {
+    console.error('Get checkpoints error:', error);
+    return res.status(500).json({ message: 'Server error.' });
+  }
+};
+
 
 module.exports = {
   createActivity,
@@ -364,4 +441,5 @@ module.exports = {
   getVideosByActivity,
   getVideoById,
   getActivityLearnView,
+  getCheckpointsByActivity,
 };
