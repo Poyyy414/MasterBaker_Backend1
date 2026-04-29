@@ -142,10 +142,11 @@ const submitCheckpoint = async (req, res) => {
     await conn.beginTransaction();
 
     const { checkpoint_id } = req.params;
-    const { student_id, activity_id, answers = [] } = req.body;
+    const student_id = req.user.role_id;        // ← from JWT, no longer from body
+    const { activity_id, answers = [] } = req.body;
 
-    if (!student_id || !activity_id) {
-      return res.status(400).json({ message: 'student_id and activity_id are required.' });
+    if (!activity_id) {
+      return res.status(400).json({ message: 'activity_id is required.' });
     }
 
     let totalScore = 0;
@@ -242,7 +243,6 @@ const submitCheckpoint = async (req, res) => {
     conn.release();
   }
 };
-
 module.exports = {
   createCheckpoint,
   getCheckpointsByActivity,
