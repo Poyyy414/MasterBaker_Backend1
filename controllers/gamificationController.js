@@ -1,52 +1,206 @@
 const db = require('../config/db');
+const { POINTS, applyTryAgain } = require('./pointsConfig'); // ✅ no circular dep
+
+// ════════════════════════════════════════════════════════════════════════════════
+// HELPER — Get attempt number
+// ════════════════════════════════════════════════════════════════════════════════
+const getAttemptNumber = async (conn, user_id, recipe_id, game_type_id) => {
+  const [rows] = await conn.query(
+    `SELECT COUNT(*) AS cnt FROM game_sessions
+     WHERE user_id = ? AND recipe_id = ? AND game_type_id = ?`,
+    [user_id, recipe_id, game_type_id]
+  );
+  return (rows[0].cnt || 0) + 1;
+};
 
 // ════════════════════════════════════════════════════════════════════════════════
 // SAVE GAME SESSION + LOG POINTS + AUTO-AWARD BADGES
 // POST /api/student/game-sessions
-// Body: { recipe_id, game_type_id, score, total_items, points_earned }
 // ════════════════════════════════════════════════════════════════════════════════
 const createGameSession = async (req, res) => {
   const conn = await db.getConnection();
   try {
     await conn.beginTransaction();
 
-    const student_id = req.user.role_id;   // from JWT, same pattern as submitCheckpoint
-    const { recipe_id, game_type_id, score, total_items, points_earned = 0 } = req.body;
+    const user_id = req.user.role_id;
+    const { recipe_id, game_type_id, score, total_items, on_time = false } = req.body;
 
     if (!recipe_id || !game_type_id || score == null || !total_items) {
-      return res.status(400).json({ message: 'recipe_id, game_type_id, score, and total_items are required.' });
+      return res.status(400).json({
+        message: 'recipe_id, game_type_id, score, and total_items are required.',
+      });
     }
 
-    // Save session
+    const [gtRows] = await conn.query(
+      `SELECT code FROM game_types WHERE game_type_id = ?`, [game_type_id]
+    );
+    if (gtRows.length === 0) {
+      return res.status(400).json({ message: 'Invalid game_type_id.' });
+    }
+    const gameCode = gtRows[0].code;
+
+    const attemptNumber = await getAttemptNumber(conn, user_id, recipe_id, game_type_id);
+
+    let rawPoints = 0;
+    if (gameCode === 'PICK_INGREDIENT') {
+      rawPoints = score * POINTS.PTRI_CORRECT_INGREDIENT;
+      rawPoints += on_time ? POINTS.PTRI_TIME_ATTACK_BONUS : POINTS.PTRI_TIME_ATTACK_FAIL;
+    } else if (gameCode === 'TAG_SEQUENCE') {
+      rawPoints = score * POINTS.SEQ_CORRECT_STEP;
+      rawPoints += on_time ? POINTS.SEQ_TIME_ATTACK_BONUS : POINTS.SEQ_TIME_ATTACK_FAIL;
+    } else if (gameCode === 'SPOT_DIFFERENCE') {
+      rawPoints = score * POINTS.SPOT_PER_ANOMALY;
+      rawPoints += on_time ? POINTS.SPOT_TIME_ATTACK_BONUS : POINTS.SPOT_TIME_ATTACK_FAIL;
+    }
+
+    const points_earned = applyTryAgain(rawPoints, attemptNumber);
+
     const [result] = await conn.query(
-      `INSERT INTO game_sessions (user_id, recipe_id, game_type_id, score, total_items, points_earned)
+      `INSERT INTO game_sessions
+         (user_id, recipe_id, game_type_id, score, total_items, points_earned)
        VALUES (?, ?, ?, ?, ?, ?)`,
-      [student_id, recipe_id, game_type_id, score, total_items, points_earned]
+      [user_id, recipe_id, game_type_id, score, total_items, points_earned]
     );
     const session_id = result.insertId;
 
-    // Log points
     await conn.query(
       `INSERT INTO points_log (user_id, session_id, points_earned) VALUES (?, ?, ?)`,
-      [student_id, session_id, points_earned]
+      [user_id, session_id, points_earned]
     );
 
-    // Auto-award badges
-    const newBadges = await awardBadges(conn, student_id, score, total_items);
+    const newBadges = await awardBadges(conn, user_id, score, total_items);
 
     await conn.commit();
 
     return res.status(201).json({
-      message:       'Game session saved.',
+      message:           'Game session saved.',
       session_id,
       score,
       total_items,
+      attempt_number:    attemptNumber,
+      try_again_penalty: attemptNumber > 1,
+      raw_points:        rawPoints,
       points_earned,
-      badges_earned: newBadges,
+      badges_earned:     newBadges,
     });
   } catch (error) {
     await conn.rollback();
     console.error('Create game session error:', error);
+    return res.status(500).json({ message: 'Server error.' });
+  } finally {
+    conn.release();
+  }
+};
+
+// ════════════════════════════════════════════════════════════════════════════════
+// LOG VIDEO LESSON COMPLETION
+// POST /api/student/video-complete
+// ════════════════════════════════════════════════════════════════════════════════
+const completeVideoLesson = async (req, res) => {
+  const conn = await db.getConnection();
+  try {
+    await conn.beginTransaction();
+
+    const user_id = req.user.role_id;
+    const { video_id, activity_id } = req.body;
+
+    if (!video_id || !activity_id) {
+      return res.status(400).json({ message: 'video_id and activity_id are required.' });
+    }
+
+    const [already] = await conn.query(
+      `SELECT progress_id FROM student_progress
+       WHERE student_id = ? AND activity_id = ? AND video_id = ? AND is_completed = 1`,
+      [user_id, activity_id, video_id]
+    );
+
+    if (already.length > 0) {
+      await conn.rollback();
+      return res.status(200).json({
+        message:       'Already completed. No additional points awarded.',
+        points_earned: 0,
+      });
+    }
+
+    await conn.query(
+      `INSERT INTO student_progress
+         (student_id, activity_id, video_id, is_completed, completed_at)
+       VALUES (?, ?, ?, 1, NOW())
+       ON DUPLICATE KEY UPDATE
+         video_id     = VALUES(video_id),
+         is_completed = 1,
+         completed_at = NOW()`,
+      [user_id, activity_id, video_id]
+    );
+
+    await conn.query(
+      `INSERT INTO points_log (user_id, session_id, points_earned) VALUES (?, 0, ?)`,
+      [user_id, POINTS.VIDEO_LESSON_COMPLETED]
+    );
+
+    await conn.commit();
+
+    return res.status(200).json({
+      message:       'Video lesson completed!',
+      points_earned: POINTS.VIDEO_LESSON_COMPLETED,
+    });
+  } catch (error) {
+    await conn.rollback();
+    console.error('Complete video lesson error:', error);
+    return res.status(500).json({ message: 'Server error.' });
+  } finally {
+    conn.release();
+  }
+};
+
+// ════════════════════════════════════════════════════════════════════════════════
+// LOG CHECKPOINT COMPLETION
+// POST /api/student/checkpoint-complete
+// ════════════════════════════════════════════════════════════════════════════════
+const completeCheckpoint = async (req, res) => {
+  const conn = await db.getConnection();
+  try {
+    await conn.beginTransaction();
+
+    const user_id = req.user.role_id;
+    const { checkpoint_id, correct_count, difficulty = 'easy', activity_id } = req.body;
+
+    if (!checkpoint_id || correct_count == null) {
+      return res.status(400).json({ message: 'checkpoint_id and correct_count are required.' });
+    }
+
+    const [progressRows] = await conn.query(
+      `SELECT attempt_count FROM student_progress WHERE student_id = ? AND activity_id = ?`,
+      [user_id, activity_id || 0]
+    );
+    const attemptNumber = progressRows.length > 0 ? (progressRows[0].attempt_count || 1) : 1;
+
+    const ptsPerCorrect = difficulty === 'hard'
+      ? POINTS.CHECKPOINT_CORRECT_HARD
+      : POINTS.CHECKPOINT_CORRECT_EASY;
+
+    const rawPoints     = correct_count * ptsPerCorrect;
+    const points_earned = applyTryAgain(rawPoints, attemptNumber);
+
+    await conn.query(
+      `INSERT INTO points_log (user_id, session_id, points_earned) VALUES (?, 0, ?)`,
+      [user_id, points_earned]
+    );
+
+    await conn.commit();
+
+    return res.status(200).json({
+      message:           'Checkpoint points logged.',
+      correct_count,
+      difficulty,
+      attempt_number:    attemptNumber,
+      try_again_penalty: attemptNumber > 1,
+      raw_points:        rawPoints,
+      points_earned,
+    });
+  } catch (error) {
+    await conn.rollback();
+    console.error('Complete checkpoint error:', error);
     return res.status(500).json({ message: 'Server error.' });
   } finally {
     conn.release();
@@ -59,15 +213,15 @@ const createGameSession = async (req, res) => {
 // ════════════════════════════════════════════════════════════════════════════════
 const getMyGameSessions = async (req, res) => {
   try {
-    const student_id = req.user.role_id;
+    const user_id = req.user.role_id;
 
     const [rows] = await db.query(
-      `SELECT gs.*, gt.name AS game_type_name
+      `SELECT gs.*, gt.name AS game_type_name, gt.code AS game_type_code
        FROM game_sessions gs
        JOIN game_types gt ON gs.game_type_id = gt.game_type_id
        WHERE gs.user_id = ?
        ORDER BY gs.completed_at DESC`,
-      [student_id]
+      [user_id]
     );
 
     return res.status(200).json(rows);
@@ -78,13 +232,41 @@ const getMyGameSessions = async (req, res) => {
 };
 
 // ════════════════════════════════════════════════════════════════════════════════
-// GET LEADERBOARD
+// GET LEADERBOARD — ALL students ranked by total points
 // GET /api/student/leaderboard
 // GET /api/teacher/leaderboard
+//
+// Returns EVERY student (not just top 50) so the frontend can show
+// each user their own rank even if they're outside the top tier.
 // ════════════════════════════════════════════════════════════════════════════════
 const getLeaderboard = async (req, res) => {
   try {
-    const [rows] = await db.query(`SELECT * FROM leaderboard LIMIT 50`);
+    const [rows] = await db.query(`
+      SELECT
+        u.user_id,
+        u.firstname,
+        u.lastname,
+        COALESCE(SUM(pl.points_earned), 0)            AS total_points,
+        COUNT(DISTINCT gs.session_id)                  AS games_played,
+        COUNT(DISTINCT CASE WHEN sp.is_completed = 1
+              THEN sp.activity_id END)                 AS lessons_completed,
+        RANK() OVER (
+          ORDER BY COALESCE(SUM(pl.points_earned), 0) DESC
+        )                                              AS rank_position
+      FROM users u
+      LEFT JOIN points_log pl
+             ON pl.user_id = u.user_id
+      LEFT JOIN game_sessions gs
+             ON gs.user_id = u.user_id
+      LEFT JOIN students s
+             ON s.user_id  = u.user_id
+      LEFT JOIN student_progress sp
+             ON sp.student_id = s.student_id
+      WHERE u.role = 'student'
+      GROUP BY u.user_id, u.firstname, u.lastname
+      ORDER BY total_points DESC
+    `);
+
     return res.status(200).json(rows);
   } catch (error) {
     console.error('Get leaderboard error:', error);
@@ -98,7 +280,7 @@ const getLeaderboard = async (req, res) => {
 // ════════════════════════════════════════════════════════════════════════════════
 const getMyBadges = async (req, res) => {
   try {
-    const student_id = req.user.role_id;
+    const user_id = req.user.role_id;
 
     const [rows] = await db.query(
       `SELECT b.badge_id, b.name, b.description, b.icon_url, ub.earned_at
@@ -106,7 +288,7 @@ const getMyBadges = async (req, res) => {
        JOIN badges b ON ub.badge_id = b.badge_id
        WHERE ub.user_id = ?
        ORDER BY ub.earned_at DESC`,
-      [student_id]
+      [user_id]
     );
 
     return res.status(200).json(rows);
@@ -122,22 +304,41 @@ const getMyBadges = async (req, res) => {
 // ════════════════════════════════════════════════════════════════════════════════
 const getMyPoints = async (req, res) => {
   try {
-    const student_id = req.user.role_id;
+    const user_id = req.user.role_id;
 
-    const [rows] = await db.query(
-      `SELECT pl.log_id, pl.points_earned, pl.earned_at,
-              gt.name AS game_type_name, gs.score, gs.total_items
+    const [gameRows] = await db.query(
+      `SELECT
+         pl.log_id, pl.points_earned, pl.earned_at,
+         gt.name  AS source_name,
+         gs.score, gs.total_items,
+         'game'   AS source_type
        FROM points_log pl
        JOIN game_sessions gs ON pl.session_id = gs.session_id
        JOIN game_types gt    ON gs.game_type_id = gt.game_type_id
-       WHERE pl.user_id = ?
+       WHERE pl.user_id = ? AND pl.session_id > 0
        ORDER BY pl.earned_at DESC`,
-      [student_id]
+      [user_id]
     );
 
-    const total_points = rows.reduce((sum, r) => sum + r.points_earned, 0);
+    const [lessonRows] = await db.query(
+      `SELECT
+         pl.log_id, pl.points_earned, pl.earned_at,
+         'Lesson / Checkpoint' AS source_name,
+         NULL AS score, NULL AS total_items,
+         'lesson' AS source_type
+       FROM points_log pl
+       WHERE pl.user_id = ? AND pl.session_id = 0
+       ORDER BY pl.earned_at DESC`,
+      [user_id]
+    );
 
-    return res.status(200).json({ total_points, history: rows });
+    const history = [...gameRows, ...lessonRows].sort(
+      (a, b) => new Date(b.earned_at) - new Date(a.earned_at)
+    );
+
+    const total_points = history.reduce((sum, r) => sum + r.points_earned, 0);
+
+    return res.status(200).json({ total_points, history });
   } catch (error) {
     console.error('Get points error:', error);
     return res.status(500).json({ message: 'Server error.' });
@@ -154,22 +355,25 @@ const awardBadges = async (conn, user_id, score, total_items) => {
     `SELECT session_id FROM game_sessions WHERE user_id = ?`, [user_id]
   );
 
-  // badge_id 2: First Win
   if (sessions.length === 1) {
-    const awarded = await tryAwardBadge(conn, user_id, 2);
-    if (awarded) newBadges.push(2);
+    if (await tryAwardBadge(conn, user_id, 2)) newBadges.push(2);
   }
 
-  // badge_id 1: Perfect Score
   if (score === total_items) {
-    const awarded = await tryAwardBadge(conn, user_id, 1);
-    if (awarded) newBadges.push(1);
+    if (await tryAwardBadge(conn, user_id, 1)) newBadges.push(1);
   }
 
-  // badge_id 3: Streak Master (5+ games)
   if (sessions.length >= 5) {
-    const awarded = await tryAwardBadge(conn, user_id, 3);
-    if (awarded) newBadges.push(3);
+    if (await tryAwardBadge(conn, user_id, 3)) newBadges.push(3);
+  }
+
+  const [lb] = await conn.query(`
+    SELECT user_id FROM (
+      SELECT user_id, SUM(points_earned) AS total
+      FROM points_log GROUP BY user_id ORDER BY total DESC LIMIT 1
+    ) top`);
+  if (lb.length > 0 && lb[0].user_id === user_id) {
+    if (await tryAwardBadge(conn, user_id, 4)) newBadges.push(4);
   }
 
   return newBadges;
@@ -189,8 +393,12 @@ const tryAwardBadge = async (conn, user_id, badge_id) => {
 
 module.exports = {
   createGameSession,
+  completeVideoLesson,
+  completeCheckpoint,
   getMyGameSessions,
   getLeaderboard,
   getMyBadges,
   getMyPoints,
+  POINTS,
+  applyTryAgain, // ✅ FIXED: was missing from exports — needed by sequenceController & gameItemsController
 };
