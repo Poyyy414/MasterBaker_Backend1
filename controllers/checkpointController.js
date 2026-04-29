@@ -243,6 +243,75 @@ const submitCheckpoint = async (req, res) => {
     conn.release();
   }
 };
+
+// ════════════════════════════════════════════════════════════════════════════════
+// GET STUDENT PROGRESS FOR AN ACTIVITY
+// GET /api/student/activities/:activity_id/progress
+// ════════════════════════════════════════════════════════════════════════════════
+const getActivityProgress = async (req, res) => {
+  try {
+    const { activity_id } = req.params;
+    const student_id = req.user.role_id;
+
+    const [checkpoints] = await db.query(
+      `SELECT c.checkpoint_id, c.title, c.order_index,
+              sp.score
+       FROM checkpoints c
+       LEFT JOIN student_progress sp 
+         ON sp.checkpoint_id = c.checkpoint_id 
+         AND sp.student_id = ?
+       WHERE c.activity_id = ?
+       ORDER BY c.order_index`,
+      [student_id, activity_id]
+    );
+
+    for (const cp of checkpoints) {
+      const [questions] = await db.query(
+        `SELECT q.question_id, q.question_text, q.question_type,
+                sa.given_answer, sa.is_correct
+         FROM questions q
+         LEFT JOIN student_answers sa 
+           ON sa.question_id = q.question_id 
+           AND sa.student_id = ?
+         WHERE q.checkpoint_id = ?
+         ORDER BY q.order_index`,
+        [student_id, cp.checkpoint_id]
+      );
+
+      cp.questions       = questions;
+      cp.total_questions = questions.length;
+      cp.correct         = questions.filter(q => q.is_correct === 1).length;
+      cp.wrong           = questions.filter(q => q.is_correct === 0 && q.given_answer !== null).length;
+      cp.unanswered      = questions.filter(q => q.given_answer === null).length;
+      cp.score           = cp.correct;
+    }
+
+    const totalQuestions  = checkpoints.reduce((sum, cp) => sum + cp.total_questions, 0);
+    const totalCorrect    = checkpoints.reduce((sum, cp) => sum + cp.correct, 0);
+    const totalWrong      = checkpoints.reduce((sum, cp) => sum + cp.wrong, 0);
+    const totalUnanswered = checkpoints.reduce((sum, cp) => sum + cp.unanswered, 0);
+    const completed       = checkpoints.every(cp => cp.unanswered === 0);
+
+    return res.status(200).json({
+      activity_id: parseInt(activity_id),
+      student_id,
+      summary: {
+        total_questions: totalQuestions,
+        correct:         totalCorrect,
+        wrong:           totalWrong,
+        unanswered:      totalUnanswered,
+        score:           `${totalCorrect}/${totalQuestions}`,
+        percentage:      totalQuestions > 0 ? Math.round((totalCorrect / totalQuestions) * 100) : 0,
+        completed,
+      },
+      checkpoints,
+    });
+  } catch (error) {
+    console.error('Get activity progress error:', error);
+    return res.status(500).json({ message: 'Server error.' });
+  }
+};
+
 module.exports = {
   createCheckpoint,
   getCheckpointsByActivity,
@@ -250,4 +319,5 @@ module.exports = {
   updateCheckpoint,
   deleteCheckpoint,
   submitCheckpoint,
+  getActivityProgress,
 };

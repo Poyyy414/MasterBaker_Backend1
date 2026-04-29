@@ -23,6 +23,7 @@ const {
   getCheckpointsByActivity,
   getCheckpointById,
   submitCheckpoint,
+  getActivityProgress,
 } = require('../controllers/checkpointController');
 
 const {
@@ -43,6 +44,7 @@ router.get('/videos/:video_id',                      auth, getVideoById);
 router.get ('/checkpoints/:checkpoint_id/questions', auth, getQuestionsByCheckpoint);
 router.get ('/checkpoints/:checkpoint_id',           auth, getCheckpointById);
 router.post('/checkpoints/:checkpoint_id/submit',    auth, submitCheckpoint);
+router.get('/activities/:activity_id/progress',     auth, getActivityProgress);
 
 // ── Student profile (/:id MUST be last) ──────────────────────────────────────
 router.get   ('/',    auth, getAllStudents);

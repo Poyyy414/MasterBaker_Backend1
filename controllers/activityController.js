@@ -351,6 +351,7 @@ const getActivityLearnView = async (req, res) => {
   }
 };
 
+
 module.exports = {
   createActivity,
   getAllActivities,
