@@ -160,41 +160,58 @@ const submitCheckpoint = async (req, res) => {
 
       switch (question_type) {
         case 'multiple_choice': {
-          const [opt] = await conn.query(
-            `SELECT is_correct FROM question_options WHERE question_id = ? AND option_text = ?`,
-            [question_id, given_answer]
+          const [allOptions] = await conn.query(
+            `SELECT option_text, is_correct FROM question_options WHERE question_id = ?`,
+            [question_id]
           );
-          is_correct = opt.length > 0 && opt[0].is_correct === 1 ? 1 : 0;
+
+          const correctAnswers = allOptions
+            .filter(o => o.is_correct === 1)
+            .map(o => o.option_text.toLowerCase().trim())
+            .sort();
+
+          const givenAnswers = given_answer
+            .split(',')
+            .map(a => a.toLowerCase().trim())
+            .sort();
+
+          is_correct = JSON.stringify(correctAnswers) === JSON.stringify(givenAnswers) ? 1 : 0;
           break;
         }
+
         case 'true_or_false': {
           const [tf] = await conn.query(
             `SELECT correct_answer FROM question_tf_answers WHERE question_id = ?`,
             [question_id]
           );
-          is_correct = tf.length > 0 && tf[0].correct_answer === given_answer.toLowerCase() ? 1 : 0;
+          is_correct = tf.length > 0 &&
+            tf[0].correct_answer.toLowerCase().trim() === given_answer.toLowerCase().trim() ? 1 : 0;
           break;
         }
+
         case 'identification': {
           const [ident] = await conn.query(
             `SELECT correct_answer FROM question_identification_answers WHERE question_id = ?`,
             [question_id]
           );
           is_correct = ident.length > 0 &&
-            ident[0].correct_answer.toLowerCase() === given_answer.toLowerCase() ? 1 : 0;
+            ident[0].correct_answer.toLowerCase().trim() === given_answer.toLowerCase().trim() ? 1 : 0;
           break;
         }
+
         case 'matching_type': {
           const [pairs] = await conn.query(
             `SELECT left_item, right_item FROM question_matching_pairs WHERE question_id = ?`,
             [question_id]
           );
           const correctMap = {};
-          pairs.forEach(p => { correctMap[p.left_item.toLowerCase()] = p.right_item.toLowerCase(); });
+          pairs.forEach(p => {
+            correctMap[p.left_item.toLowerCase().trim()] = p.right_item.toLowerCase().trim();
+          });
           const givenPairs = given_answer.split(',').map(p => p.trim().split(':'));
           let allMatch = givenPairs.length === pairs.length;
           for (const [left, right] of givenPairs) {
-            if (!left || !right || correctMap[left.toLowerCase()] !== right.toLowerCase()) {
+            if (!left || !right || correctMap[left.toLowerCase().trim()] !== right.toLowerCase().trim()) {
               allMatch = false;
               break;
             }
@@ -230,6 +247,7 @@ const submitCheckpoint = async (req, res) => {
       total: answers.length,
       results,
     });
+
   } catch (error) {
     await conn.rollback();
     console.error('Submit checkpoint error:', error);
