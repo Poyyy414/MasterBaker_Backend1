@@ -1,8 +1,9 @@
 const db = require('../config/db');
-const { POINTS } = require('./pointsConfig'); // ✅ no circular dep
+const { POINTS, applyTryAgain }         = require('./pointsConfig');
+const { getAttemptNumber, awardBadges } = require('./gamificationController');
 
 // ════════════════════════════════════════════════════════════════════════════════
-// GET SEQUENCE STEPS (student — shuffled, no correct_order)
+// GET SEQUENCE STEPS (student — shuffled, correct_order hidden)
 // GET /api/student/games/:game_id/sequence
 // ════════════════════════════════════════════════════════════════════════════════
 const getSequenceSteps = async (req, res) => {
@@ -21,10 +22,11 @@ const getSequenceSteps = async (req, res) => {
     );
 
     return res.status(200).json({
-      game_id:    game[0].game_id,
-      title:      game[0].title,
-      time_limit: game[0].time_limit,
-      question:   steps[0]?.question_text || 'Arrange the steps in the correct order.',
+      game_id:     game[0].game_id,
+      title:       game[0].title,
+      description: game[0].description,
+      time_limit:  game[0].time_limit,
+      question:    steps[0]?.question_text || 'Arrange the steps in the correct order.',
       steps,
     });
   } catch (error) {
@@ -34,7 +36,7 @@ const getSequenceSteps = async (req, res) => {
 };
 
 // ════════════════════════════════════════════════════════════════════════════════
-// GET SEQUENCE STEPS (teacher — ordered, with correct_order)
+// GET SEQUENCE STEPS (teacher — ordered, with correct_order exposed)
 // GET /api/teacher/games/:game_id/sequence
 // ════════════════════════════════════════════════════════════════════════════════
 const getSequenceStepsTeacher = async (req, res) => {
@@ -62,7 +64,7 @@ const getSequenceStepsTeacher = async (req, res) => {
 // POST /api/student/games/:game_id/sequence/submit
 //
 // Body:
-//   user_sequence  [{ step_id, user_order }]
+//   user_sequence  [{ step_id, user_order }]   — student's arrangement
 //   recipe_id      INT
 //   on_time        BOOL
 // ════════════════════════════════════════════════════════════════════════════════
@@ -71,37 +73,28 @@ const checkSequence = async (req, res) => {
   try {
     await conn.beginTransaction();
 
-    const { game_id }     = req.params;
-    const user_id         = req.user.role_id;
+    const { game_id }    = req.params;
+    const user_id        = req.user.role_id;
     const { user_sequence, recipe_id, on_time = false } = req.body;
 
     if (!Array.isArray(user_sequence) || user_sequence.length === 0) {
       return res.status(400).json({ message: 'user_sequence must be a non-empty array.' });
     }
-    if (!recipe_id) {
-      return res.status(400).json({ message: 'recipe_id is required.' });
-    }
+    if (!recipe_id) return res.status(400).json({ message: 'recipe_id is required.' });
 
-    // Resolve game_type_id
     const [gtRows] = await conn.query(
       `SELECT game_type_id FROM game_types WHERE code = 'TAG_SEQUENCE'`
     );
+    if (!gtRows[0]) return res.status(500).json({ message: "game_type 'TAG_SEQUENCE' not found." });
     const game_type_id = gtRows[0].game_type_id;
 
-    // Attempt number
-    const [prevSessions] = await conn.query(
-      `SELECT COUNT(*) AS cnt FROM game_sessions
-       WHERE user_id = ? AND recipe_id = ? AND game_type_id = ?`,
-      [user_id, recipe_id, game_type_id]
-    );
-    const attemptNumber = (prevSessions[0].cnt || 0) + 1;
+    const attemptNumber = await getAttemptNumber(conn, user_id, recipe_id, game_type_id);
 
-    // Get correct steps
     const [steps] = await conn.query(
-      `SELECT step_id, step_text, correct_order FROM game_sequence_steps WHERE game_id = ?`,
-      [game_id]
+      `SELECT step_id, step_text, correct_order FROM game_sequence_steps WHERE game_id = ?`, [game_id]
     );
 
+    // Build lookup: step_id → correct_order
     const correctMap = {};
     steps.forEach(s => { correctMap[s.step_id] = s.correct_order; });
 
@@ -116,17 +109,11 @@ const checkSequence = async (req, res) => {
     const percentage = total > 0 ? Math.round((correctCount / total) * 100) : 0;
     const passed     = percentage >= 60;
 
-    // ── Points calculation ──────────────────────────────────────────────────
-    let rawPoints = correctCount * POINTS.SEQ_CORRECT_STEP;
-    rawPoints += on_time ? POINTS.SEQ_TIME_ATTACK_BONUS : POINTS.SEQ_TIME_ATTACK_FAIL;
-    const points_earned = attemptNumber > 1
-      ? Math.floor(rawPoints * POINTS.TRY_AGAIN_MULTIPLIER)
-      : rawPoints;
+    const rawPoints    = correctCount * POINTS.SEQ_CORRECT_STEP + (on_time ? POINTS.SEQ_TIME_ATTACK_BONUS : 0);
+    const points_earned = applyTryAgain(rawPoints, attemptNumber);
 
-    // ── Save session ────────────────────────────────────────────────────────
     const [result] = await conn.query(
-      `INSERT INTO game_sessions
-         (user_id, recipe_id, game_type_id, score, total_items, points_earned)
+      `INSERT INTO game_sessions (user_id, recipe_id, game_type_id, score, total_items, points_earned)
        VALUES (?, ?, ?, ?, ?, ?)`,
       [user_id, recipe_id, game_type_id, correctCount, total, points_earned]
     );
@@ -136,6 +123,8 @@ const checkSequence = async (req, res) => {
       `INSERT INTO points_log (user_id, session_id, points_earned) VALUES (?, ?, ?)`,
       [user_id, session_id, points_earned]
     );
+
+    const badges_earned = await awardBadges(conn, user_id, correctCount, total);
 
     await conn.commit();
 
@@ -151,6 +140,7 @@ const checkSequence = async (req, res) => {
       points_earned,
       on_time,
       results,
+      badges_earned,
     });
   } catch (error) {
     await conn.rollback();
@@ -164,6 +154,7 @@ const checkSequence = async (req, res) => {
 // ════════════════════════════════════════════════════════════════════════════════
 // CREATE SEQUENCE STEP (teacher)
 // POST /api/teacher/games/:game_id/sequence
+// Body: { question_text?, step_text, step_image?, correct_order }
 // ════════════════════════════════════════════════════════════════════════════════
 const createSequenceStep = async (req, res) => {
   try {
@@ -182,7 +173,6 @@ const createSequenceStep = async (req, res) => {
        VALUES (?, ?, ?, ?, ?)`,
       [game_id, question_text || null, step_text, step_image || null, correct_order]
     );
-
     return res.status(201).json({ message: 'Sequence step created.', step_id: result.insertId });
   } catch (error) {
     console.error('Create sequence step error:', error);
@@ -206,14 +196,13 @@ const updateSequenceStep = async (req, res) => {
 
     await db.query(
       `UPDATE game_sequence_steps SET
-        question_text = COALESCE(?, question_text),
-        step_text     = COALESCE(?, step_text),
-        step_image    = COALESCE(?, step_image),
-        correct_order = COALESCE(?, correct_order)
+         question_text = COALESCE(?, question_text),
+         step_text     = COALESCE(?, step_text),
+         step_image    = COALESCE(?, step_image),
+         correct_order = COALESCE(?, correct_order)
        WHERE step_id = ?`,
-      [question_text || null, step_text || null, step_image || null, correct_order ?? null, step_id]
+      [question_text ?? null, step_text ?? null, step_image ?? null, correct_order ?? null, step_id]
     );
-
     return res.status(200).json({ message: 'Sequence step updated.' });
   } catch (error) {
     console.error('Update sequence step error:', error);
@@ -228,7 +217,6 @@ const updateSequenceStep = async (req, res) => {
 const deleteSequenceStep = async (req, res) => {
   try {
     const { step_id } = req.params;
-
     const [existing] = await db.query(
       `SELECT step_id FROM game_sequence_steps WHERE step_id = ?`, [step_id]
     );
