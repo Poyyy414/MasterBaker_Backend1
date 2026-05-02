@@ -1,6 +1,6 @@
 const { cloudinary } = require('../config/cloudinary');
-const multer      = require('multer');
-const { Readable } = require('stream');
+const multer         = require('multer');
+const { Readable }   = require('stream');
 
 // ════════════════════════════════════════════════════════════════════════════════
 // MULTER — store in memory (we stream to Cloudinary, not disk)
@@ -24,7 +24,6 @@ const upload = multer({
 
 // ════════════════════════════════════════════════════════════════════════════════
 // HELPER — stream a buffer to Cloudinary
-// folder: where to store in Cloudinary (e.g. 'masterbaker/games')
 // ════════════════════════════════════════════════════════════════════════════════
 const streamToCloudinary = (buffer, folder) => {
   return new Promise((resolve, reject) => {
@@ -50,7 +49,6 @@ const streamToCloudinary = (buffer, folder) => {
 // UPLOAD SINGLE IMAGE
 // POST /api/upload/image
 // Form field: "image"
-// Optional body: folder (default: 'masterbaker/general')
 // ════════════════════════════════════════════════════════════════════════════════
 const uploadImage = [
   upload.single('image'),
@@ -59,13 +57,11 @@ const uploadImage = [
       if (!req.file) {
         return res.status(400).json({ message: 'No image file provided. Use field name "image".' });
       }
-
       const folder = req.body.folder || 'masterbaker/general';
       const result = await streamToCloudinary(req.file.buffer, folder);
-
       return res.status(200).json({
         message:   'Image uploaded successfully.',
-        url:       result.secure_url,       // ← use this as image_url in your game controllers
+        url:       result.secure_url,
         public_id: result.public_id,
         width:     result.width,
         height:    result.height,
@@ -82,7 +78,6 @@ const uploadImage = [
 // ════════════════════════════════════════════════════════════════════════════════
 // UPLOAD GAME ITEM IMAGE
 // POST /api/upload/game-item
-// For: Pick the Right Ingredient item images
 // Form field: "image"
 // ════════════════════════════════════════════════════════════════════════════════
 const uploadGameItemImage = [
@@ -90,12 +85,10 @@ const uploadGameItemImage = [
   async (req, res) => {
     try {
       if (!req.file) return res.status(400).json({ message: 'No image file provided.' });
-
       const result = await streamToCloudinary(req.file.buffer, 'masterbaker/game-items');
-
       return res.status(200).json({
-        message: 'Game item image uploaded.',
-        url:     result.secure_url,
+        message:   'Game item image uploaded.',
+        url:       result.secure_url,
         public_id: result.public_id,
       });
     } catch (error) {
@@ -108,7 +101,6 @@ const uploadGameItemImage = [
 // ════════════════════════════════════════════════════════════════════════════════
 // UPLOAD SEQUENCE STEP IMAGE
 // POST /api/upload/sequence-step
-// For: Tag the Sequence step images
 // Form field: "image"
 // ════════════════════════════════════════════════════════════════════════════════
 const uploadSequenceStepImage = [
@@ -116,12 +108,10 @@ const uploadSequenceStepImage = [
   async (req, res) => {
     try {
       if (!req.file) return res.status(400).json({ message: 'No image file provided.' });
-
       const result = await streamToCloudinary(req.file.buffer, 'masterbaker/sequence-steps');
-
       return res.status(200).json({
-        message: 'Sequence step image uploaded.',
-        url:     result.secure_url,
+        message:   'Sequence step image uploaded.',
+        url:       result.secure_url,
         public_id: result.public_id,
       });
     } catch (error) {
@@ -134,7 +124,6 @@ const uploadSequenceStepImage = [
 // ════════════════════════════════════════════════════════════════════════════════
 // UPLOAD DIFFERENCE IMAGES (original + modified pair)
 // POST /api/upload/difference
-// For: Spot the Difference — uploads BOTH images in one request
 // Form fields: "original" and "modified"
 // ════════════════════════════════════════════════════════════════════════════════
 const uploadDifferenceImages = [
@@ -153,7 +142,6 @@ const uploadDifferenceImages = [
         });
       }
 
-      // Upload both in parallel
       const [originalResult, modifiedResult] = await Promise.all([
         streamToCloudinary(originalFile.buffer, 'masterbaker/difference/original'),
         streamToCloudinary(modifiedFile.buffer, 'masterbaker/difference/modified'),
@@ -161,8 +149,8 @@ const uploadDifferenceImages = [
 
       return res.status(200).json({
         message:            'Difference images uploaded successfully.',
-        original_image_url: originalResult.secure_url,  // ← pass to createDifferenceImage
-        modified_image_url: modifiedResult.secure_url,  // ← pass to createDifferenceImage
+        original_image_url: originalResult.secure_url,
+        modified_image_url: modifiedResult.secure_url,
         original_public_id: originalResult.public_id,
         modified_public_id: modifiedResult.public_id,
       });
@@ -174,7 +162,7 @@ const uploadDifferenceImages = [
 ];
 
 // ════════════════════════════════════════════════════════════════════════════════
-// UPLOAD ACTIVITY VIDEO THUMBNAIL
+// UPLOAD THUMBNAIL
 // POST /api/upload/thumbnail
 // Form field: "image"
 // ════════════════════════════════════════════════════════════════════════════════
@@ -183,17 +171,51 @@ const uploadThumbnail = [
   async (req, res) => {
     try {
       if (!req.file) return res.status(400).json({ message: 'No image file provided.' });
-
       const result = await streamToCloudinary(req.file.buffer, 'masterbaker/thumbnails');
-
       return res.status(200).json({
-        message: 'Thumbnail uploaded.',
-        url:     result.secure_url,
+        message:   'Thumbnail uploaded.',
+        url:       result.secure_url,
         public_id: result.public_id,
       });
     } catch (error) {
       console.error('Upload thumbnail error:', error);
       return res.status(500).json({ message: 'Upload failed.', error: error.message });
+    }
+  },
+];
+
+// ════════════════════════════════════════════════════════════════════════════════
+// BULK UPLOAD — multiple images at once
+// POST /api/upload/bulk
+// Form field: "images" (multiple files, max 20)
+// Body field: folder (text) — e.g. masterbaker/game-items
+// ════════════════════════════════════════════════════════════════════════════════
+const uploadBulk = [
+  upload.array('images', 20),
+  async (req, res) => {
+    try {
+      if (!req.files || req.files.length === 0) {
+        return res.status(400).json({ message: 'No images uploaded. Use field name "images".' });
+      }
+
+      const folder = req.body.folder || 'masterbaker/general';
+
+      const uploads = await Promise.all(
+        req.files.map(file => streamToCloudinary(file.buffer, folder))
+      );
+
+      return res.status(200).json({
+        message: `${uploads.length} image(s) uploaded successfully.`,
+        images: uploads.map((result, i) => ({
+          index:     i,
+          filename:  req.files[i].originalname,
+          url:       result.secure_url,
+          public_id: result.public_id,
+        })),
+      });
+    } catch (error) {
+      console.error('Bulk upload error:', error);
+      return res.status(500).json({ message: 'Bulk upload failed.', error: error.message });
     }
   },
 ];
@@ -227,6 +249,7 @@ module.exports = {
   uploadSequenceStepImage,
   uploadDifferenceImages,
   uploadThumbnail,
+  uploadBulk,
   deleteImage,
-  upload, // export multer instance in case other controllers need it
+  upload,
 };

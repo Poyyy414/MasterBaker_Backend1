@@ -8,25 +8,16 @@ const {
   uploadSequenceStepImage,
   uploadDifferenceImages,
   uploadThumbnail,
+  uploadBulk,
   deleteImage,
 } = require('../controllers/uploadController');
 
-// POST /api/upload/image
-router.post('/image',         verifyToken, uploadImage);
-
-// POST /api/upload/game-item
-router.post('/game-item',     verifyToken, uploadGameItemImage);
-
-// POST /api/upload/sequence-step
-router.post('/sequence-step', verifyToken, uploadSequenceStepImage);
-
-// POST /api/upload/difference
-router.post('/difference',    verifyToken, uploadDifferenceImages);
-
-// POST /api/upload/thumbnail
-router.post('/thumbnail',     verifyToken, uploadThumbnail);
-
-// DELETE /api/upload/image
-router.delete('/image',       verifyToken, deleteImage);
+router.post  ('/image',         verifyToken, uploadImage);
+router.post  ('/game-item',     verifyToken, uploadGameItemImage);
+router.post  ('/sequence-step', verifyToken, uploadSequenceStepImage);
+router.post  ('/difference',    verifyToken, uploadDifferenceImages);
+router.post  ('/thumbnail',     verifyToken, uploadThumbnail);
+router.post  ('/bulk',          verifyToken, uploadBulk);
+router.delete('/image',         verifyToken, deleteImage);
 
 module.exports = router;
