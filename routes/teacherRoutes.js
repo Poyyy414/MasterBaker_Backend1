@@ -71,6 +71,13 @@ const {
   deleteGame,
 } = require('../controllers/gamesController');
 
+const{
+  getStudentOverview,
+  getStudentLessonProgress,
+  getStudentGameProgress,
+  getStudentCheckpointProgress,
+} = require('../controllers/studentProgressController');
+
 // ── Activity management ───────────────────────────────────────────────────────
 router.post  ('/activities',                           auth, createActivity);
 router.get   ('/activities',                           auth, getAllActivities);
@@ -121,6 +128,13 @@ router.get   ('/activities/:activity_id/games',  auth, getGamesByActivity);
 router.get   ('/games/:game_id',                 auth, getGameById);
 router.put   ('/games/:game_id',                 auth, updateGame);
 router.delete('/games/:game_id',                 auth, deleteGame);
+
+// - Student Progress (for content management) ─────────────────────────────────────────────
+router.get   ('/students/:student_id/overview',          auth, getStudentOverview);
+router.get   ('/students/:student_id/lessons',           auth, getStudentLessonProgress);
+router.get   ('/students/:student_id/games',             auth, getStudentGameProgress);
+router.get   ('/students/:student_id/checkpoints',       auth, getStudentCheckpointProgress);
+
 
 // ── Leaderboard ───────────────────────────────────────────────────────────────
 router.get   ('/leaderboard',                          auth, getLeaderboard);

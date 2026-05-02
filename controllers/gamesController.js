@@ -7,7 +7,7 @@ const db = require('../config/db');
 // ════════════════════════════════════════════════════════════════════════════════
 const createGame = async (req, res) => {
   try {
-    const { activity_id, game_type_id, title, description, time_limit, display_order = 0 } = req.body;
+    const { activity_id, game_type_id, title, description, time_limit, display_order = 0, thumbnail_url } = req.body;
 
     if (!activity_id || !game_type_id || !title) {
       return res.status(400).json({ message: 'activity_id, game_type_id, and title are required.' });
@@ -24,9 +24,9 @@ const createGame = async (req, res) => {
     if (gameType.length === 0) return res.status(404).json({ message: 'Game type not found.' });
 
     const [result] = await db.query(
-      `INSERT INTO games (activity_id, game_type_id, title, description, time_limit, display_order)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [activity_id, game_type_id, title, description || null, time_limit || null, display_order]
+      `INSERT INTO games (activity_id, game_type_id, title, description, time_limit, display_order, thumbnail_url   )
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [activity_id, game_type_id, title, description || null, time_limit || null, display_order, thumbnail_url || null]
     );
 
     return res.status(201).json({
@@ -131,7 +131,7 @@ const getGameTypes = async (req, res) => {
 const updateGame = async (req, res) => {
   try {
     const { game_id } = req.params;
-    const { title, description, time_limit, display_order } = req.body;
+    const { title, description, time_limit, display_order, thumbnail_url } = req.body;
 
     const [existing] = await db.query(
       `SELECT game_id FROM games WHERE game_id = ?`, [game_id]
@@ -143,9 +143,10 @@ const updateGame = async (req, res) => {
          title         = COALESCE(?, title),
          description   = COALESCE(?, description),
          time_limit    = COALESCE(?, time_limit),
-         display_order = COALESCE(?, display_order)
+         display_order = COALESCE(?, display_order),
+         thumbnail_url = COALESCE(?, thumbnail_url)
        WHERE game_id = ?`,
-      [title || null, description || null, time_limit ?? null, display_order ?? null, game_id]
+      [title || null, description || null, time_limit ?? null, display_order ?? null, thumbnail_url || null, game_id]
     );
 
     return res.status(200).json({ message: 'Game updated successfully.' });
