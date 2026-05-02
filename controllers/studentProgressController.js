@@ -15,25 +15,18 @@ const _getStudentInfo = async (studentId) => {
 };
 
 // ════════════════════════════════════════════════════════════════════════════════
-// HELPER — fetch & compute session stats for one level (game_id + game_type_id)
-// recipe_id = game_id (confirmed across all 3 game controllers)
+// HELPER — fetch session stats for one game + game_type
 // ════════════════════════════════════════════════════════════════════════════════
 const _getLevelStats = async (studentId, game_id, game_type_id) => {
   const [sessions] = await db.query(
     `SELECT
-       session_id,
-       score,
-       total_items,
-       points_earned,
-       completed_at,
+       session_id, score, total_items, points_earned, completed_at,
        CASE WHEN total_items > 0
             THEN ROUND((score / total_items) * 100)
             ELSE 0
        END AS score_percent
      FROM game_sessions
-     WHERE user_id      = ?
-       AND recipe_id    = ?
-       AND game_type_id = ?
+     WHERE user_id = ? AND recipe_id = ? AND game_type_id = ?
      ORDER BY completed_at ASC`,
     [studentId, game_id, game_type_id]
   );
@@ -69,8 +62,8 @@ const _getLevelStats = async (studentId, game_id, game_type_id) => {
 };
 
 // ════════════════════════════════════════════════════════════════════════════════
-// 1. OVERVIEW
-// GET /api/teacher/progress/student/:studentId
+// 1. STUDENT OVERVIEW
+// GET /api/teacher/progress/student/:student_id
 // ════════════════════════════════════════════════════════════════════════════════
 const getStudentOverview = async (req, res) => {
   try {
@@ -78,11 +71,14 @@ const getStudentOverview = async (req, res) => {
     const student = await _getStudentInfo(studentId);
     if (!student) return res.status(404).json({ message: 'Student not found.' });
 
+    // Total points
     const [[pointsRow]] = await db.query(
-      `SELECT COALESCE(SUM(points_earned), 0) AS total_points FROM points_log WHERE user_id = ?`,
+      `SELECT COALESCE(SUM(points_earned), 0) AS total_points
+       FROM points_log WHERE user_id = ?`,
       [studentId]
     );
 
+    // Rank position
     const [[rankRow]] = await db.query(
       `SELECT COUNT(*) + 1 AS rank_position
        FROM (
@@ -93,62 +89,78 @@ const getStudentOverview = async (req, res) => {
       [pointsRow.total_points]
     );
 
+    // Badges — uses your actual badges table with user_id column
     const [badges] = await db.query(
-      `SELECT b.badge_id, b.name, b.icon_url, ub.earned_at
-       FROM user_badges ub
-       JOIN badges b ON ub.badge_id = b.badge_id
-       WHERE ub.user_id = ? ORDER BY ub.earned_at DESC`,
+      `SELECT badge_id, name, description, icon_url, earned_at
+       FROM badges
+       WHERE user_id = ?
+       ORDER BY earned_at DESC`,
       [studentId]
     );
 
+    // Games played
     const [[gamesRow]] = await db.query(
       `SELECT COUNT(*) AS games_played FROM game_sessions WHERE user_id = ?`,
       [studentId]
     );
 
-    const [paths] = await db.query(`SELECT path_id, name FROM learning_paths ORDER BY path_id`);
+    // Activity completion per path
+    const [paths] = await db.query(
+      `SELECT path_id, name FROM paths ORDER BY path_id`
+    );
+
     const pathProgress = [];
-    let totalGamesAll = 0, passedGamesAll = 0;
+    let totalActivitiesAll = 0, completedActivitiesAll = 0;
 
     for (const path of paths) {
-      const [[totalRow]] = await db.query(
-        `SELECT COUNT(DISTINCT g.game_id) AS total
-         FROM games g JOIN activities a ON a.activity_id = g.activity_id
-         WHERE a.path_id = ?`,
+      const [activities] = await db.query(
+        `SELECT activity_id FROM activities WHERE path_id = ?`,
         [path.path_id]
       );
-      const [[passedRow]] = await db.query(
-        `SELECT COUNT(DISTINCT gs.recipe_id) AS passed
-         FROM game_sessions gs
-         JOIN games g ON g.game_id = gs.recipe_id
-         JOIN activities a ON a.activity_id = g.activity_id
-         WHERE gs.user_id = ? AND a.path_id = ?
-           AND gs.total_items > 0
-           AND (gs.score / gs.total_items) >= 0.6`,
-        [studentId, path.path_id]
-      );
 
-      const total = totalRow.total, passed = passedRow.passed;
-      totalGamesAll += total; passedGamesAll += passed;
+      let completedCount = 0;
+      for (const act of activities) {
+        // activity is completed if all its checkpoints are submitted
+        const [[cpRow]] = await db.query(
+          `SELECT COUNT(*) AS total FROM checkpoints WHERE activity_id = ?`,
+          [act.activity_id]
+        );
+        const [[doneRow]] = await db.query(
+          `SELECT COUNT(DISTINCT checkpoint_id) AS done
+           FROM student_progress
+           WHERE student_id = ? AND activity_id = ?`,
+          [student.student_id, act.activity_id]
+        );
+        if (cpRow.total > 0 && doneRow.done >= cpRow.total) completedCount++;
+      }
+
+      totalActivitiesAll += activities.length;
+      completedActivitiesAll += completedCount;
+
       pathProgress.push({
-        path_id: path.path_id, path_name: path.name,
-        total_games: total, completed_games: passed,
-        completion_percent: total > 0 ? Math.round((passed / total) * 100) : 0,
+        path_id:            path.path_id,
+        path_name:          path.name,
+        total_activities:   activities.length,
+        completed_activities: completedCount,
+        completion_percent: activities.length > 0
+          ? Math.round((completedCount / activities.length) * 100) : 0,
       });
     }
 
     return res.status(200).json({
       student: {
-        user_id: student.user_id, firstname: student.firstname,
-        lastname: student.lastname, email: student.email,
+        user_id:   student.user_id,
+        firstname: student.firstname,
+        lastname:  student.lastname,
+        email:     student.email,
       },
       total_points:               pointsRow.total_points,
       rank_position:              rankRow.rank_position,
       games_played:               gamesRow.games_played,
       badges_earned:              badges.length,
       badges,
-      overall_completion_percent: totalGamesAll > 0
-        ? Math.round((passedGamesAll / totalGamesAll) * 100) : 0,
+      overall_completion_percent: totalActivitiesAll > 0
+        ? Math.round((completedActivitiesAll / totalActivitiesAll) * 100) : 0,
       paths: pathProgress,
     });
   } catch (error) {
@@ -158,8 +170,8 @@ const getStudentOverview = async (req, res) => {
 };
 
 // ════════════════════════════════════════════════════════════════════════════════
-// 2. LESSON PROGRESS
-// GET /api/teacher/progress/student/:studentId/lessons
+// 2. LESSON PROGRESS (videos watched per activity)
+// GET /api/teacher/progress/student/:student_id/lessons
 // ════════════════════════════════════════════════════════════════════════════════
 const getStudentLessonProgress = async (req, res) => {
   try {
@@ -167,51 +179,76 @@ const getStudentLessonProgress = async (req, res) => {
     const student = await _getStudentInfo(studentId);
     if (!student) return res.status(404).json({ message: 'Student not found.' });
 
-    const [paths] = await db.query(`SELECT path_id, name FROM learning_paths ORDER BY path_id`);
+    const [paths] = await db.query(
+      `SELECT path_id, name FROM paths ORDER BY path_id`
+    );
     const result = [];
 
     for (const path of paths) {
       const [activities] = await db.query(
-        `SELECT activity_id, title FROM activities WHERE path_id = ? ORDER BY order_index`,
+        `SELECT activity_id, title FROM activities
+         WHERE path_id = ? ORDER BY order_index`,
         [path.path_id]
       );
       const activityData = [];
 
       for (const act of activities) {
+        // Get videos for this activity
         const [videos] = await db.query(
-          `SELECT v.video_id, v.title AS video_title, v.duration_sec,
-             sp.is_completed, sp.completed_at,
-             CASE WHEN sp.is_completed = 1 THEN 30 ELSE 0 END AS points_earned
-           FROM videos v
+          `SELECT v.video_id, v.label AS video_title, v.duration,
+                  sp.is_completed, sp.completed_at
+           FROM activity_videos v
            LEFT JOIN student_progress sp
              ON sp.video_id = v.video_id
-             AND sp.student_id = ? AND sp.activity_id = ?
-           WHERE v.activity_id = ? ORDER BY v.order_index`,
+             AND sp.student_id = ?
+             AND sp.activity_id = ?
+           WHERE v.activity_id = ?
+           ORDER BY v.order_index`,
           [student.student_id, act.activity_id, act.activity_id]
         );
 
         const completed = videos.filter(v => v.is_completed).length;
+        const pointsFromVideos = completed * 30; // 30 pts per video
+
         activityData.push({
-          activity_id: act.activity_id, activity_title: act.title,
-          total_videos: videos.length, completed_videos: completed,
-          completion_percent: videos.length > 0 ? Math.round((completed / videos.length) * 100) : 0,
-          points_from_videos: videos.reduce((s, v) => s + v.points_earned, 0),
-          videos,
+          activity_id:        act.activity_id,
+          activity_title:     act.title,
+          total_videos:       videos.length,
+          completed_videos:   completed,
+          completion_percent: videos.length > 0
+            ? Math.round((completed / videos.length) * 100) : 0,
+          points_from_videos: pointsFromVideos,
+          videos: videos.map(v => ({
+            video_id:     v.video_id,
+            video_title:  v.video_title,
+            duration:     v.duration,
+            is_completed: !!v.is_completed,
+            completed_at: v.completed_at,
+            points:       v.is_completed ? 30 : 0,
+          })),
         });
       }
 
-      const pt = activityData.reduce((s, a) => s + a.total_videos, 0);
-      const pc = activityData.reduce((s, a) => s + a.completed_videos, 0);
+      const totalVideos     = activityData.reduce((s, a) => s + a.total_videos, 0);
+      const completedVideos = activityData.reduce((s, a) => s + a.completed_videos, 0);
+
       result.push({
-        path_id: path.path_id, path_name: path.name,
-        total_videos: pt, completed_videos: pc,
-        completion_percent: pt > 0 ? Math.round((pc / pt) * 100) : 0,
+        path_id:            path.path_id,
+        path_name:          path.name,
+        total_videos:       totalVideos,
+        completed_videos:   completedVideos,
+        completion_percent: totalVideos > 0
+          ? Math.round((completedVideos / totalVideos) * 100) : 0,
         activities: activityData,
       });
     }
 
     return res.status(200).json({
-      student: { user_id: student.user_id, firstname: student.firstname, lastname: student.lastname },
+      student: {
+        user_id:   student.user_id,
+        firstname: student.firstname,
+        lastname:  student.lastname,
+      },
       lesson_progress: result,
     });
   } catch (error) {
@@ -222,7 +259,7 @@ const getStudentLessonProgress = async (req, res) => {
 
 // ════════════════════════════════════════════════════════════════════════════════
 // 3. CHECKPOINT PROGRESS
-// GET /api/teacher/progress/student/:studentId/checkpoints
+// GET /api/teacher/progress/student/:student_id/checkpoints
 // ════════════════════════════════════════════════════════════════════════════════
 const getStudentCheckpointProgress = async (req, res) => {
   try {
@@ -230,63 +267,94 @@ const getStudentCheckpointProgress = async (req, res) => {
     const student = await _getStudentInfo(studentId);
     if (!student) return res.status(404).json({ message: 'Student not found.' });
 
-    const [paths] = await db.query(`SELECT path_id, name FROM learning_paths ORDER BY path_id`);
+    const [paths] = await db.query(
+      `SELECT path_id, name FROM paths ORDER BY path_id`
+    );
     const result = [];
 
     for (const path of paths) {
       const [activities] = await db.query(
-        `SELECT activity_id, title FROM activities WHERE path_id = ? ORDER BY order_index`,
+        `SELECT activity_id, title FROM activities
+         WHERE path_id = ? ORDER BY order_index`,
         [path.path_id]
       );
       const activityData = [];
 
       for (const act of activities) {
         const [checkpoints] = await db.query(
-          `SELECT c.checkpoint_id, c.title AS checkpoint_title, c.difficulty, c.passing_score,
-             (SELECT COUNT(*) FROM questions q WHERE q.checkpoint_id = c.checkpoint_id) AS total_questions
-           FROM checkpoints c WHERE c.activity_id = ? ORDER BY c.order_index`,
+          `SELECT checkpoint_id, title AS checkpoint_title, order_index
+           FROM checkpoints
+           WHERE activity_id = ? ORDER BY order_index`,
           [act.activity_id]
         );
 
         const checkpointData = [];
         for (const cp of checkpoints) {
-          const [attempts] = await db.query(
-            `SELECT attempt_id, correct_count, score_percent, passed, points_earned, attempted_at
-             FROM checkpoint_student_attempts
-             WHERE student_id = ? AND checkpoint_id = ? ORDER BY attempted_at ASC`,
+          // Get student answers for this checkpoint
+          const [questions] = await db.query(
+            `SELECT q.question_id, q.question_text, q.question_type,
+                    sa.given_answer, sa.is_correct
+             FROM questions q
+             LEFT JOIN student_answers sa
+               ON sa.question_id = q.question_id
+               AND sa.student_id = ?
+             WHERE q.checkpoint_id = ?
+             ORDER BY q.order_index`,
             [student.student_id, cp.checkpoint_id]
           );
 
-          const best = attempts.reduce((b, a) =>
-            (!b || a.score_percent > b.score_percent) ? a : b, null
+          // Get score from student_progress
+          const [[progressRow]] = await db.query(
+            `SELECT score FROM student_progress
+             WHERE student_id = ? AND checkpoint_id = ?
+             LIMIT 1`,
+            [student.student_id, cp.checkpoint_id]
           );
 
+          const totalQ   = questions.length;
+          const correct  = questions.filter(q => q.is_correct === 1).length;
+          const answered = progressRow !== undefined;
+          const percent  = totalQ > 0 ? Math.round((correct / totalQ) * 100) : 0;
+
           checkpointData.push({
-            checkpoint_id: cp.checkpoint_id, checkpoint_title: cp.checkpoint_title,
-            difficulty: cp.difficulty, passing_score: cp.passing_score,
-            total_questions: cp.total_questions, attempt_count: attempts.length,
-            best_correct: best?.correct_count ?? 0, best_percent: best?.score_percent ?? 0,
-            best_passed: best?.passed ?? false,
-            total_points_earned: attempts.reduce((s, a) => s + (a.points_earned || 0), 0),
-            attempts,
+            checkpoint_id:    cp.checkpoint_id,
+            checkpoint_title: cp.checkpoint_title,
+            total_questions:  totalQ,
+            correct_answers:  correct,
+            wrong_answers:    questions.filter(q => q.is_correct === 0 && q.given_answer !== null).length,
+            score_percent:    percent,
+            passed:           percent >= 60,
+            submitted:        answered,
+            score:            progressRow?.score ?? null,
+            questions,
           });
         }
 
-        const passed_cp = checkpointData.filter(c => c.best_passed).length;
+        const passedCp = checkpointData.filter(c => c.passed).length;
         activityData.push({
-          activity_id: act.activity_id, activity_title: act.title,
-          total_checkpoints: checkpointData.length, passed_checkpoints: passed_cp,
+          activity_id:        act.activity_id,
+          activity_title:     act.title,
+          total_checkpoints:  checkpointData.length,
+          passed_checkpoints: passedCp,
           completion_percent: checkpointData.length > 0
-            ? Math.round((passed_cp / checkpointData.length) * 100) : 0,
+            ? Math.round((passedCp / checkpointData.length) * 100) : 0,
           checkpoints: checkpointData,
         });
       }
 
-      result.push({ path_id: path.path_id, path_name: path.name, activities: activityData });
+      result.push({
+        path_id:    path.path_id,
+        path_name:  path.name,
+        activities: activityData,
+      });
     }
 
     return res.status(200).json({
-      student: { user_id: student.user_id, firstname: student.firstname, lastname: student.lastname },
+      student: {
+        user_id:   student.user_id,
+        firstname: student.firstname,
+        lastname:  student.lastname,
+      },
       checkpoint_progress: result,
     });
   } catch (error) {
@@ -296,22 +364,8 @@ const getStudentCheckpointProgress = async (req, res) => {
 };
 
 // ════════════════════════════════════════════════════════════════════════════════
-// 4. GAME PROGRESS — per-level breakdown per game type per path
-// GET /api/teacher/progress/student/:studentId/games
-//
-// Response structure:
-//   summary { overall totals }
-//   paths[]
-//     path_id, path_name, path_completion_percent, path_total_points_earned
-//     game_types[]
-//       game_type_code (PICK_INGREDIENT | TAG_SEQUENCE | SPOT_DIFFERENCE)
-//       type_completion_percent
-//       levels[]                ← each game is one level
-//         game_id, level_title
-//         content_info          ← ingredients count / steps count / spots count
-//         attempts, best_score, best_percentage, passed
-//         total_points_earned, last_played
-//         session_history[]
+// 4. GAME PROGRESS
+// GET /api/teacher/progress/student/:student_id/games
 // ════════════════════════════════════════════════════════════════════════════════
 const getStudentGameProgress = async (req, res) => {
   try {
@@ -322,141 +376,97 @@ const getStudentGameProgress = async (req, res) => {
     const [gameTypes] = await db.query(
       `SELECT game_type_id, code, name FROM game_types ORDER BY game_type_id`
     );
-    const [paths] = await db.query(
-      `SELECT path_id, name FROM learning_paths ORDER BY path_id`
+
+    // Get all games
+    const [allGames] = await db.query(
+      `SELECT game_id, title, description, time_limit, order_index
+       FROM games ORDER BY order_index`
     );
 
-    const pathResults = [];
+    const gameTypeResults = [];
 
-    for (const path of paths) {
-      const gameTypeResults = [];
+    for (const gt of gameTypes) {
+      const levels = [];
+      let levelsPassed = 0;
 
-      for (const gt of gameTypes) {
-
-        // All games of this type in this path, ordered by display_order (= difficulty level)
-        const [games] = await db.query(
-          `SELECT g.game_id, g.title, g.description, g.time_limit, g.display_order
-           FROM games g
-           JOIN activities a ON a.activity_id = g.activity_id
-           WHERE a.path_id      = ?
-             AND g.game_type_id = ?
-           ORDER BY g.display_order ASC`,
-          [path.path_id, gt.game_type_id]
-        );
-
-        if (games.length === 0) continue;
-
-        const levels = [];
-        let type_levels_passed = 0;
-
-        for (const game of games) {
-
-          // ── Content info (what the teacher set up) ──────────────────────────
-          let content_info = {};
-
-          if (gt.code === 'PICK_INGREDIENT') {
+      for (const game of allGames) {
+        // Content info
+        let content_info = {};
+        if (gt.code === 'PICK_INGREDIENT') {
+          const [[row]] = await db.query(
+            `SELECT COUNT(*) AS total,
+                    SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END) AS correct
+             FROM game_items WHERE game_id = ?`,
+            [game.game_id]
+          );
+          content_info = {
+            total_ingredients:   row.total,
+            correct_ingredients: row.correct,
+          };
+        } else if (gt.code === 'TAG_SEQUENCE') {
+          const [[row]] = await db.query(
+            `SELECT COUNT(*) AS total_steps
+             FROM game_sequence_steps WHERE game_id = ?`,
+            [game.game_id]
+          );
+          content_info = { total_steps: row.total_steps };
+        } else if (gt.code === 'SPOT_DIFFERENCE') {
+          const [images] = await db.query(
+            `SELECT image_id FROM game_difference_images WHERE game_id = ?`,
+            [game.game_id]
+          );
+          let total_spots = 0;
+          for (const img of images) {
             const [[row]] = await db.query(
-              `SELECT
-                 COUNT(*) AS total_ingredients,
-                 SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END) AS correct_ingredients
-               FROM game_items WHERE game_id = ?`,
-              [game.game_id]
+              `SELECT COUNT(*) AS cnt
+               FROM game_difference_spots WHERE image_id = ?`,
+              [img.image_id]
             );
-            content_info = {
-              total_ingredients:   row.total_ingredients,
-              correct_ingredients: row.correct_ingredients,
-              // e.g. student must identify 5 correct out of 12 shown
-            };
-
-          } else if (gt.code === 'TAG_SEQUENCE') {
-            const [[row]] = await db.query(
-              `SELECT COUNT(*) AS total_steps FROM game_sequence_steps WHERE game_id = ?`,
-              [game.game_id]
-            );
-            content_info = { total_steps: row.total_steps };
-
-          } else if (gt.code === 'SPOT_DIFFERENCE') {
-            const [images] = await db.query(
-              `SELECT image_id FROM game_difference_images WHERE game_id = ?`,
-              [game.game_id]
-            );
-            let total_spots = 0;
-            for (const img of images) {
-              const [[row]] = await db.query(
-                `SELECT COUNT(*) AS cnt FROM game_difference_spots WHERE image_id = ?`,
-                [img.image_id]
-              );
-              total_spots += row.cnt;
-            }
-            content_info = {
-              total_image_pairs: images.length,
-              total_spots,
-            };
+            total_spots += row.cnt;
           }
-
-          // ── Student session stats for this level ────────────────────────────
-          // recipe_id = game_id (pattern confirmed across all 3 controllers)
-          const stats = await _getLevelStats(studentId, game.game_id, gt.game_type_id);
-
-          if (stats.passed) type_levels_passed++;
-
-          levels.push({
-            game_id:       game.game_id,
-            level_title:   game.title,
-            description:   game.description,
-            time_limit:    game.time_limit,
-            display_order: game.display_order,
-            content_info,
-            // student progress fields spread in:
-            attempts:            stats.attempts,
-            best_score:          stats.best_score,
-            best_total:          stats.best_total,
-            best_percentage:     stats.best_percentage,
-            passed:              stats.passed,
-            total_points_earned: stats.total_points_earned,
-            last_played:         stats.last_played,
-            session_history:     stats.session_history,
-          });
+          content_info = {
+            total_image_pairs: images.length,
+            total_spots,
+          };
         }
 
-        const type_completion_percent = games.length > 0
-          ? Math.round((type_levels_passed / games.length) * 100)
-          : 0;
+        const stats = await _getLevelStats(studentId, game.game_id, gt.game_type_id);
+        if (stats.passed) levelsPassed++;
 
-        gameTypeResults.push({
-          game_type_id:           gt.game_type_id,
-          game_type_code:         gt.code,
-          game_type_name:         gt.name,
-          total_levels:           games.length,
-          levels_passed:          type_levels_passed,
-          type_completion_percent,
-          levels,
+        levels.push({
+          game_id:             game.game_id,
+          level_title:         game.title,
+          description:         game.description,
+          time_limit:          game.time_limit,
+          content_info,
+          attempts:            stats.attempts,
+          best_score:          stats.best_score,
+          best_total:          stats.best_total,
+          best_percentage:     stats.best_percentage,
+          passed:              stats.passed,
+          total_points_earned: stats.total_points_earned,
+          last_played:         stats.last_played,
+          session_history:     stats.session_history,
         });
       }
 
-      // ── Path totals ─────────────────────────────────────────────────────────
-      const path_total_levels  = gameTypeResults.reduce((s, g) => s + g.total_levels,  0);
-      const path_levels_passed = gameTypeResults.reduce((s, g) => s + g.levels_passed, 0);
-      const path_total_points  = gameTypeResults.reduce(
-        (s, g) => s + g.levels.reduce((ls, l) => ls + l.total_points_earned, 0), 0
-      );
-
-      pathResults.push({
-        path_id:                  path.path_id,
-        path_name:                path.name,
-        path_total_levels,
-        path_levels_passed,
-        path_completion_percent:  path_total_levels > 0
-          ? Math.round((path_levels_passed / path_total_levels) * 100) : 0,
-        path_total_points_earned: path_total_points,
-        game_types:               gameTypeResults,
+      gameTypeResults.push({
+        game_type_id:           gt.game_type_id,
+        game_type_code:         gt.code,
+        game_type_name:         gt.name,
+        total_levels:           allGames.length,
+        levels_passed:          levelsPassed,
+        type_completion_percent: allGames.length > 0
+          ? Math.round((levelsPassed / allGames.length) * 100) : 0,
+        levels,
       });
     }
 
-    // ── Grand totals ─────────────────────────────────────────────────────────
-    const grand_total  = pathResults.reduce((s, p) => s + p.path_total_levels,  0);
-    const grand_passed = pathResults.reduce((s, p) => s + p.path_levels_passed, 0);
-    const grand_points = pathResults.reduce((s, p) => s + p.path_total_points_earned, 0);
+    const grandTotal  = gameTypeResults.reduce((s, g) => s + g.total_levels, 0);
+    const grandPassed = gameTypeResults.reduce((s, g) => s + g.levels_passed, 0);
+    const grandPoints = gameTypeResults.reduce(
+      (s, g) => s + g.levels.reduce((ls, l) => ls + l.total_points_earned, 0), 0
+    );
 
     return res.status(200).json({
       student: {
@@ -465,13 +475,13 @@ const getStudentGameProgress = async (req, res) => {
         lastname:  student.lastname,
       },
       summary: {
-        overall_total_levels:        grand_total,
-        overall_levels_passed:       grand_passed,
-        overall_completion_percent:  grand_total > 0
-          ? Math.round((grand_passed / grand_total) * 100) : 0,
-        overall_total_points_earned: grand_points,
+        overall_total_levels:        grandTotal,
+        overall_levels_passed:       grandPassed,
+        overall_completion_percent:  grandTotal > 0
+          ? Math.round((grandPassed / grandTotal) * 100) : 0,
+        overall_total_points_earned: grandPoints,
       },
-      paths: pathResults,
+      game_types: gameTypeResults,
     });
   } catch (error) {
     console.error('Get student game progress error:', error);
