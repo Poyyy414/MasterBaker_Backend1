@@ -74,7 +74,7 @@ const _getLevelStats = async (studentId, game_id, game_type_id) => {
 // ════════════════════════════════════════════════════════════════════════════════
 const getStudentOverview = async (req, res) => {
   try {
-    const { studentId } = req.params;
+    const { student_id: studentId } = req.params;
     const student = await _getStudentInfo(studentId);
     if (!student) return res.status(404).json({ message: 'Student not found.' });
 
@@ -163,7 +163,7 @@ const getStudentOverview = async (req, res) => {
 // ════════════════════════════════════════════════════════════════════════════════
 const getStudentLessonProgress = async (req, res) => {
   try {
-    const { studentId } = req.params;
+    const { student_id: studentId } = req.params;
     const student = await _getStudentInfo(studentId);
     if (!student) return res.status(404).json({ message: 'Student not found.' });
 
@@ -226,7 +226,7 @@ const getStudentLessonProgress = async (req, res) => {
 // ════════════════════════════════════════════════════════════════════════════════
 const getStudentCheckpointProgress = async (req, res) => {
   try {
-    const { studentId } = req.params;
+    const { student_id: studentId } = req.params;
     const student = await _getStudentInfo(studentId);
     if (!student) return res.status(404).json({ message: 'Student not found.' });
 
@@ -315,7 +315,7 @@ const getStudentCheckpointProgress = async (req, res) => {
 // ════════════════════════════════════════════════════════════════════════════════
 const getStudentGameProgress = async (req, res) => {
   try {
-    const { studentId } = req.params;
+    const { student_id: studentId } = req.params;
     const student = await _getStudentInfo(studentId);
     if (!student) return res.status(404).json({ message: 'Student not found.' });
 
