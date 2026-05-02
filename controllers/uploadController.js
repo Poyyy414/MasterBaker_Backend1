@@ -1,4 +1,4 @@
-const cloudinary  = require('../config/cloudinary');
+const { cloudinary } = require('../config/cloudinary');
 const multer      = require('multer');
 const { Readable } = require('stream');
 
