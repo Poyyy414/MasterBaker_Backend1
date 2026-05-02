@@ -61,6 +61,16 @@ const {
   getLeaderboard,
 } = require('../controllers/gamificationController');
 
+const {
+  getGameTypes,
+  createGame,
+  getAllGames,
+  getGameById,
+  getGamesByActivity,
+  updateGame,
+  deleteGame,
+} = require('../controllers/gamesController');
+
 // ── Activity management ───────────────────────────────────────────────────────
 router.post  ('/activities',                           auth, createActivity);
 router.get   ('/activities',                           auth, getAllActivities);
@@ -102,6 +112,15 @@ router.get   ('/games/:game_id/sequence',              auth, getSequenceStepsTea
 router.post  ('/games/:game_id/sequence',              auth, createSequenceStep);
 router.put   ('/sequence-steps/:step_id',              auth, updateSequenceStep);
 router.delete('/sequence-steps/:step_id',              auth, deleteSequenceStep);
+
+// ── Game management ─────────────────────────────────────────────────────────────
+router.get   ('/game-types',                        auth, getGameTypes);
+router.post  ('/games',                          auth, createGame); 
+router.get   ('/games',                          auth, getAllGames);
+router.get   ('/activities/:activity_id/games',  auth, getGamesByActivity);
+router.get   ('/games/:game_id',                 auth, getGameById);
+router.put   ('/games/:game_id',                 auth, updateGame);
+router.delete('/games/:game_id',                 auth, deleteGame);
 
 // ── Leaderboard ───────────────────────────────────────────────────────────────
 router.get   ('/leaderboard',                          auth, getLeaderboard);
