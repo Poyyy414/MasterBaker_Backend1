@@ -89,7 +89,7 @@ const getStudentOverview = async (req, res) => {
       [pointsRow.total_points]
     );
 
-    // Badges — uses your actual badges table with user_id column
+    // Badges — uses badges table with user_id column directly
     const [badges] = await db.query(
       `SELECT badge_id, name, description, icon_url, earned_at
        FROM badges
@@ -120,7 +120,6 @@ const getStudentOverview = async (req, res) => {
 
       let completedCount = 0;
       for (const act of activities) {
-        // activity is completed if all its checkpoints are submitted
         const [[cpRow]] = await db.query(
           `SELECT COUNT(*) AS total FROM checkpoints WHERE activity_id = ?`,
           [act.activity_id]
@@ -128,21 +127,22 @@ const getStudentOverview = async (req, res) => {
         const [[doneRow]] = await db.query(
           `SELECT COUNT(DISTINCT checkpoint_id) AS done
            FROM student_progress
-           WHERE student_id = ? AND activity_id = ?`,
+           WHERE student_id = ? AND activity_id = ?
+             AND checkpoint_id IS NOT NULL AND score IS NOT NULL`,
           [student.student_id, act.activity_id]
         );
         if (cpRow.total > 0 && doneRow.done >= cpRow.total) completedCount++;
       }
 
-      totalActivitiesAll += activities.length;
+      totalActivitiesAll    += activities.length;
       completedActivitiesAll += completedCount;
 
       pathProgress.push({
-        path_id:            path.path_id,
-        path_name:          path.name,
-        total_activities:   activities.length,
-        completed_activities: completedCount,
-        completion_percent: activities.length > 0
+        path_id:               path.path_id,
+        path_name:             path.name,
+        total_activities:      activities.length,
+        completed_activities:  completedCount,
+        completion_percent:    activities.length > 0
           ? Math.round((completedCount / activities.length) * 100) : 0,
       });
     }
@@ -170,7 +170,7 @@ const getStudentOverview = async (req, res) => {
 };
 
 // ════════════════════════════════════════════════════════════════════════════════
-// 2. LESSON PROGRESS (videos watched per activity)
+// 2. LESSON PROGRESS
 // GET /api/teacher/progress/student/:student_id/lessons
 // ════════════════════════════════════════════════════════════════════════════════
 const getStudentLessonProgress = async (req, res) => {
@@ -193,13 +193,18 @@ const getStudentLessonProgress = async (req, res) => {
       const activityData = [];
 
       for (const act of activities) {
-        // Get videos for this activity
+        // activity_videos columns: video_id, activity_id, title, video_url, duration, order_index
         const [videos] = await db.query(
-          `SELECT v.video_id, v.label AS video_title, v.duration,
-                  sp.is_completed, sp.completed_at
+          `SELECT
+             v.video_id,
+             v.title     AS video_title,
+             v.video_url,
+             v.duration,
+             sp.is_completed,
+             sp.completed_at
            FROM activity_videos v
            LEFT JOIN student_progress sp
-             ON sp.video_id = v.video_id
+             ON sp.video_id    = v.video_id
              AND sp.student_id = ?
              AND sp.activity_id = ?
            WHERE v.activity_id = ?
@@ -207,8 +212,8 @@ const getStudentLessonProgress = async (req, res) => {
           [student.student_id, act.activity_id, act.activity_id]
         );
 
-        const completed = videos.filter(v => v.is_completed).length;
-        const pointsFromVideos = completed * 30; // 30 pts per video
+        const completed        = videos.filter(v => v.is_completed).length;
+        const pointsFromVideos = completed * 30;
 
         activityData.push({
           activity_id:        act.activity_id,
@@ -221,6 +226,7 @@ const getStudentLessonProgress = async (req, res) => {
           videos: videos.map(v => ({
             video_id:     v.video_id,
             video_title:  v.video_title,
+            video_url:    v.video_url,
             duration:     v.duration,
             is_completed: !!v.is_completed,
             completed_at: v.completed_at,
@@ -289,8 +295,9 @@ const getStudentCheckpointProgress = async (req, res) => {
         );
 
         const checkpointData = [];
+
         for (const cp of checkpoints) {
-          // Get student answers for this checkpoint
+          // Questions + student answers
           const [questions] = await db.query(
             `SELECT q.question_id, q.question_text, q.question_type,
                     sa.given_answer, sa.is_correct
@@ -303,29 +310,38 @@ const getStudentCheckpointProgress = async (req, res) => {
             [student.student_id, cp.checkpoint_id]
           );
 
-          // Get score from student_progress
-          const [[progressRow]] = await db.query(
-            `SELECT score FROM student_progress
+          // Progress row — student_progress columns:
+          // progress_id, student_id, activity_id, video_id, checkpoint_id,
+          // is_completed, score, updated_at, attempt_count, completed_at
+          const [progressRows] = await db.query(
+            `SELECT score, attempt_count, completed_at, is_completed
+             FROM student_progress
              WHERE student_id = ? AND checkpoint_id = ?
+             ORDER BY completed_at DESC
              LIMIT 1`,
             [student.student_id, cp.checkpoint_id]
           );
+          const progress = progressRows[0] || null;
 
           const totalQ   = questions.length;
           const correct  = questions.filter(q => q.is_correct === 1).length;
-          const answered = progressRow !== undefined;
+          const wrong    = questions.filter(q => q.is_correct === 0 && q.given_answer !== null).length;
           const percent  = totalQ > 0 ? Math.round((correct / totalQ) * 100) : 0;
+          const submitted = !!progress;
 
           checkpointData.push({
             checkpoint_id:    cp.checkpoint_id,
             checkpoint_title: cp.checkpoint_title,
             total_questions:  totalQ,
             correct_answers:  correct,
-            wrong_answers:    questions.filter(q => q.is_correct === 0 && q.given_answer !== null).length,
+            wrong_answers:    wrong,
+            unanswered:       totalQ - correct - wrong,
             score_percent:    percent,
             passed:           percent >= 60,
-            submitted:        answered,
-            score:            progressRow?.score ?? null,
+            submitted,
+            score:            progress?.score ?? null,
+            attempt_count:    progress?.attempt_count ?? 0,
+            completed_at:     progress?.completed_at ?? null,
             questions,
           });
         }
@@ -376,8 +392,6 @@ const getStudentGameProgress = async (req, res) => {
     const [gameTypes] = await db.query(
       `SELECT game_type_id, code, name FROM game_types ORDER BY game_type_id`
     );
-
-    // Get all games
     const [allGames] = await db.query(
       `SELECT game_id, title, description, time_limit, order_index
        FROM games ORDER BY order_index`
@@ -390,8 +404,8 @@ const getStudentGameProgress = async (req, res) => {
       let levelsPassed = 0;
 
       for (const game of allGames) {
-        // Content info
         let content_info = {};
+
         if (gt.code === 'PICK_INGREDIENT') {
           const [[row]] = await db.query(
             `SELECT COUNT(*) AS total,
@@ -451,11 +465,11 @@ const getStudentGameProgress = async (req, res) => {
       }
 
       gameTypeResults.push({
-        game_type_id:           gt.game_type_id,
-        game_type_code:         gt.code,
-        game_type_name:         gt.name,
-        total_levels:           allGames.length,
-        levels_passed:          levelsPassed,
+        game_type_id:            gt.game_type_id,
+        game_type_code:          gt.code,
+        game_type_name:          gt.name,
+        total_levels:            allGames.length,
+        levels_passed:           levelsPassed,
         type_completion_percent: allGames.length > 0
           ? Math.round((levelsPassed / allGames.length) * 100) : 0,
         levels,
