@@ -1,26 +1,32 @@
 const express = require('express');
 const router  = express.Router();
-const { uploadVideo, uploadImage } = require('../config/cloudinary.js');
-const { verifyToken } = require('../middleware/authMiddleware'); // add this
+const { verifyToken } = require('../middleware/authMiddleware');
 
-// POST /api/upload/video
-router.post('/video', verifyToken, uploadVideo.single('video'), (req, res) => {
-  if (!req.file) return res.status(400).json({ message: 'No video file uploaded.' });
-  return res.status(200).json({
-    message:   'Video uploaded successfully.',
-    video_url: req.file.path,
-    public_id: req.file.filename,
-  });
-});
+const {
+  uploadImage,
+  uploadGameItemImage,
+  uploadSequenceStepImage,
+  uploadDifferenceImages,
+  uploadThumbnail,
+  deleteImage,
+} = require('../controllers/uploadController');
 
 // POST /api/upload/image
-router.post('/image', verifyToken, uploadImage.single('image'), (req, res) => {
-  if (!req.file) return res.status(400).json({ message: 'No image file uploaded.' });
-  return res.status(200).json({
-    message:   'Image uploaded successfully.',
-    image_url: req.file.path,
-    public_id: req.file.filename,
-  });
-});
+router.post('/image',         verifyToken, uploadImage);
+
+// POST /api/upload/game-item
+router.post('/game-item',     verifyToken, uploadGameItemImage);
+
+// POST /api/upload/sequence-step
+router.post('/sequence-step', verifyToken, uploadSequenceStepImage);
+
+// POST /api/upload/difference
+router.post('/difference',    verifyToken, uploadDifferenceImages);
+
+// POST /api/upload/thumbnail
+router.post('/thumbnail',     verifyToken, uploadThumbnail);
+
+// DELETE /api/upload/image
+router.delete('/image',       verifyToken, deleteImage);
 
 module.exports = router;
