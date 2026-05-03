@@ -91,7 +91,7 @@ router.delete('/activities/:id',                        auth, deleteActivity);
 router.post  ('/activities/:id/videos',                 auth, createVideo);
 router.delete('/videos/:video_id',                      auth, deleteVideo);
 
-// ── Checkpoint management ─────────────────────────────────────────────────────
+// ── Checkpoint management ───────────────────────────────────────── ────────────
 router.post  ('/activities/:activity_id/checkpoints',   auth, createCheckpoint);
 router.put   ('/checkpoints/:checkpoint_id',            auth, updateCheckpoint);
 router.delete('/checkpoints/:checkpoint_id',            auth, deleteCheckpoint);

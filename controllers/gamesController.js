@@ -51,7 +51,7 @@ const getAllGames = async (req, res) => {
              lp.name AS path_name, lp.path_id
       FROM games g
       JOIN game_types     gt ON gt.game_type_id = g.game_type_id
-      JOIN learning_paths lp ON lp.path_id      = g.path_id
+      JOIN paths lp ON lp.path_id      = g.path_id
       ORDER BY lp.path_id, g.display_order
     `);
     return res.status(200).json(rows);
@@ -74,7 +74,7 @@ const getGameById = async (req, res) => {
              lp.name AS path_name
       FROM games g
       JOIN game_types     gt ON gt.game_type_id = g.game_type_id
-      JOIN learning_paths lp ON lp.path_id      = g.path_id
+      JOIN paths lp ON lp.path_id      = g.path_id
       WHERE g.game_id = ?
     `, [game_id]);
 
@@ -95,7 +95,7 @@ const getGamesByPath = async (req, res) => {
     const { path_id } = req.params;
 
     const [path] = await db.query(
-      `SELECT path_id, name FROM learning_paths WHERE path_id = ?`, [path_id]
+      `SELECT path_id, name FROM paths WHERE path_id = ?`, [path_id]
     );
     if (path.length === 0) return res.status(404).json({ message: 'Path not found.' });
 
