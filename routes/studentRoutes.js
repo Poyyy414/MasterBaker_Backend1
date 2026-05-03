@@ -119,10 +119,8 @@ router.get('/games/:game_id/levels',                 auth, getGameLevels);
 router.get('/games/path/:path_id',                   auth, getGamesByPathStudent);  // ← get games by path for studentsget levels by path and game type
 router.get('/games/:game_id',                        auth, getGameById);
 router.get('/games/:game_id/levels',                 auth, getGameLevels);
-router.post('/games/:game_id/play',                 auth, playGame);
+router.get('/games/:game_id/play',                 auth, playGame);
 router.get('/paths',                                auth, getPaths);
-
-
 
 
 // ── Student profile (/:id MUST be last) ──────────────────────────────────────
