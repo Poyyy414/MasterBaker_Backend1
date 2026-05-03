@@ -68,6 +68,8 @@ const {
   getGameById,
   getGamesByPathStudent,
   getGameLevels,
+  playGame,
+  getPaths
  } = require('../controllers/gamesController'); 
 
 // ── Activities ────────────────────────────────────────────────────────────────
@@ -117,6 +119,9 @@ router.get('/games/:game_id/levels',                 auth, getGameLevels);
 router.get('/games/path/:path_id',                   auth, getGamesByPathStudent);  // ← get games by path for studentsget levels by path and game type
 router.get('/games/:game_id',                        auth, getGameById);
 router.get('/games/:game_id/levels',                 auth, getGameLevels);
+router.post('/games/:game_id/play',                 auth, playGame);
+router.get('/paths',                                auth, getPaths);
+
 
 
 

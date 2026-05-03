@@ -423,6 +423,159 @@ const deleteGame = async (req, res) => {
   }
 };
 
+// ════════════════════════════════════════════════════════════════════════════════
+// PLAY GAME — auto-detects type and returns correct content
+// GET /api/student/games/:game_id/play
+// ════════════════════════════════════════════════════════════════════════════════
+const playGame = async (req, res) => {
+  try {
+    const { game_id } = req.params;
+    const user_id = req.user.role_id;
+
+    const [gameRows] = await db.query(
+      `SELECT g.*, gt.code AS game_type_code, gt.name AS game_type_name,
+              p.name AS path_name
+       FROM games g
+       JOIN game_types gt ON gt.game_type_id = g.game_type_id
+       JOIN paths p ON p.path_id = g.path_id
+       WHERE g.game_id = ?`,
+      [game_id]
+    );
+    if (gameRows.length === 0) return res.status(404).json({ message: 'Game not found.' });
+    const game = gameRows[0];
+
+    // Block if locked — check if previous level is passed
+    const [siblings] = await db.query(
+      `SELECT game_id, level FROM games
+       WHERE parent_game_id = ? OR game_id = ?
+       ORDER BY level ASC`,
+      [game.parent_game_id || game_id, game.parent_game_id || game_id]
+    );
+
+    const myIndex = siblings.findIndex(s => s.game_id === parseInt(game_id));
+    if (myIndex > 0) {
+      const prevGameId = siblings[myIndex - 1].game_id;
+      const [prevSession] = await db.query(
+        `SELECT MAX(ROUND(score / total_items * 100)) AS best_pct
+         FROM game_sessions
+         WHERE user_id = ? AND recipe_id = ?`,
+        [user_id, prevGameId]
+      );
+      const prevPct = prevSession[0]?.best_pct ?? 0;
+      if (prevPct < 60) {
+        return res.status(403).json({
+          message: 'This level is locked. Complete the previous level first.',
+          required_game_id: prevGameId,
+          your_best: prevPct,
+          required: 60,
+        });
+      }
+    }
+
+    let content = {};
+
+    switch (game.game_type_code) {
+      case 'PICK_INGREDIENT': {
+        const [items] = await db.query(
+          `SELECT item_id, item_text, item_image, question_text
+           FROM game_items WHERE game_id = ? ORDER BY RAND()`,
+          [game_id]
+        );
+        content = {
+          question: items[0]?.question_text || 'Pick the correct ingredients.',
+          items,
+        };
+        break;
+      }
+
+      case 'TAG_SEQUENCE': {
+        const [steps] = await db.query(
+          `SELECT step_id, description AS step_text, image_url AS step_image
+           FROM game_sequence_steps WHERE recipe_id = ? ORDER BY RAND()`,
+          [game_id]
+        );
+        content = {
+          question: 'Arrange the steps in the correct order.',
+          steps,
+        };
+        break;
+      }
+
+      case 'SPOT_DIFFERENCE': {
+        const [images] = await db.query(
+          `SELECT image_id, original_image_url, modified_image_url
+           FROM game_difference_images WHERE game_id = ?`,
+          [game_id]
+        );
+        for (const img of images) {
+          const [spots] = await db.query(
+            `SELECT COUNT(*) AS total_spots
+             FROM game_difference_spots WHERE image_id = ?`,
+            [img.image_id]
+          );
+          img.total_spots = spots[0].total_spots;
+        }
+        content = { images };
+        break;
+      }
+    }
+
+    // Get student's best session for this game
+    const [session] = await db.query(
+      `SELECT MAX(score) AS best_score,
+              MAX(total_items) AS best_total,
+              MAX(ROUND(score / total_items * 100)) AS best_percentage,
+              COUNT(*) AS attempts
+       FROM game_sessions
+       WHERE user_id = ? AND recipe_id = ?`,
+      [user_id, game_id]
+    );
+
+    const SUBMIT_MAP = {
+      PICK_INGREDIENT: `/api/student/games/${game_id}/pick-ingredient/submit`,
+      TAG_SEQUENCE:    `/api/student/games/${game_id}/sequence/submit`,
+      SPOT_DIFFERENCE: `/api/student/games/${game_id}/difference/check`,
+    };
+
+    return res.status(200).json({
+      game_id:        game.game_id,
+      title:          game.title,
+      description:    game.description,
+      thumbnail_url:  game.thumbnail_url,
+      time_limit:     game.time_limit,
+      difficulty:     game.difficulty,
+      level:          game.level,
+      game_type_code: game.game_type_code,
+      game_type_name: game.game_type_name,
+      path_name:      game.path_name,
+      submit_url:     SUBMIT_MAP[game.game_type_code],
+      my_stats: {
+        attempts:       session[0]?.attempts       ?? 0,
+        best_score:     session[0]?.best_score     ?? 0,
+        best_total:     session[0]?.best_total     ?? 0,
+        best_percentage: session[0]?.best_percentage ?? 0,
+        is_completed:   (session[0]?.best_percentage ?? 0) >= 60,
+      },
+      ...content,
+    });
+
+  } catch (error) {
+    console.error('Play game error:', error);
+    return res.status(500).json({ message: 'Server error.' });
+  }
+};
+
+const getPaths = async (req, res) => {
+  try {
+    const [paths] = await db.query(
+      `SELECT path_id, name, description, image_url FROM paths ORDER BY path_id`
+    );
+    return res.status(200).json(paths);
+  } catch (error) {
+    return res.status(500).json({ message: 'Server error.' });
+  }
+};
+
 module.exports = {
   createGame,
   getAllGames,
@@ -433,4 +586,6 @@ module.exports = {
   updateGame,
   deleteGame,
   getGameLevels,
+  playGame,
+  getPaths,
 };
