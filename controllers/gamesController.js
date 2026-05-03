@@ -3,20 +3,20 @@ const db = require('../config/db');
 // ════════════════════════════════════════════════════════════════════════════════
 // CREATE GAME
 // POST /api/teacher/games
-// Body: { activity_id, game_type_id, title, description, time_limit, display_order }
+// Body: { path_id, game_type_id, title, description, time_limit, display_order }
 // ════════════════════════════════════════════════════════════════════════════════
 const createGame = async (req, res) => {
   try {
-    const { activity_id, game_type_id, title, description, time_limit, display_order = 0, thumbnail_url } = req.body;
+    const { path_id, game_type_id, title, description, time_limit, display_order = 0, thumbnail_url } = req.body;
 
-    if (!activity_id || !game_type_id || !title) {
-      return res.status(400).json({ message: 'activity_id, game_type_id, and title are required.' });
+    if (!path_id || !game_type_id || !title) {
+      return res.status(400).json({ message: 'path_id, game_type_id, and title are required.' });
     }
 
-    const [activity] = await db.query(
-      `SELECT activity_id FROM activities WHERE activity_id = ?`, [activity_id]
+    const [path] = await db.query(
+      `SELECT path_id FROM learning_paths WHERE path_id = ?`, [path_id]
     );
-    if (activity.length === 0) return res.status(404).json({ message: 'Activity not found.' });
+    if (path.length === 0) return res.status(404).json({ message: 'Learning path not found.' });
 
     const [gameType] = await db.query(
       `SELECT game_type_id FROM game_types WHERE game_type_id = ?`, [game_type_id]
@@ -24,9 +24,9 @@ const createGame = async (req, res) => {
     if (gameType.length === 0) return res.status(404).json({ message: 'Game type not found.' });
 
     const [result] = await db.query(
-      `INSERT INTO games (activity_id, game_type_id, title, description, time_limit, display_order, thumbnail_url   )
+      `INSERT INTO games (path_id, game_type_id, title, description, time_limit, display_order, thumbnail_url)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [activity_id, game_type_id, title, description || null, time_limit || null, display_order, thumbnail_url || null]
+      [path_id, game_type_id, title, description || null, time_limit || null, display_order, thumbnail_url || null]
     );
 
     return res.status(201).json({
@@ -48,11 +48,11 @@ const getAllGames = async (req, res) => {
     const [rows] = await db.query(`
       SELECT g.game_id, g.title, g.description, g.time_limit, g.display_order,
              gt.name AS game_type_name, gt.code AS game_type_code,
-             a.title AS activity_title, a.activity_id
+             lp.name AS path_name, lp.path_id
       FROM games g
-      JOIN game_types  gt ON gt.game_type_id = g.game_type_id
-      JOIN activities   a ON a.activity_id   = g.activity_id
-      ORDER BY a.activity_id, g.display_order
+      JOIN game_types     gt ON gt.game_type_id = g.game_type_id
+      JOIN learning_paths lp ON lp.path_id      = g.path_id
+      ORDER BY lp.path_id, g.display_order
     `);
     return res.status(200).json(rows);
   } catch (error) {
@@ -71,10 +71,10 @@ const getGameById = async (req, res) => {
 
     const [rows] = await db.query(`
       SELECT g.*, gt.name AS game_type_name, gt.code AS game_type_code,
-             a.title AS activity_title
+             lp.name AS path_name
       FROM games g
-      JOIN game_types gt ON gt.game_type_id = g.game_type_id
-      JOIN activities  a ON a.activity_id   = g.activity_id
+      JOIN game_types     gt ON gt.game_type_id = g.game_type_id
+      JOIN learning_paths lp ON lp.path_id      = g.path_id
       WHERE g.game_id = ?
     `, [game_id]);
 
@@ -87,25 +87,34 @@ const getGameById = async (req, res) => {
 };
 
 // ════════════════════════════════════════════════════════════════════════════════
-// GET GAMES BY ACTIVITY (teacher)
-// GET /api/teacher/activities/:activity_id/games
+// GET GAMES BY PATH (teacher)
+// GET /api/teacher/games/path/:path_id
 // ════════════════════════════════════════════════════════════════════════════════
-const getGamesByActivity = async (req, res) => {
+const getGamesByPath = async (req, res) => {
   try {
-    const { activity_id } = req.params;
+    const { path_id } = req.params;
+
+    const [path] = await db.query(
+      `SELECT path_id, name FROM learning_paths WHERE path_id = ?`, [path_id]
+    );
+    if (path.length === 0) return res.status(404).json({ message: 'Path not found.' });
 
     const [rows] = await db.query(`
       SELECT g.game_id, g.title, g.description, g.time_limit, g.display_order,
              gt.name AS game_type_name, gt.code AS game_type_code
       FROM games g
       JOIN game_types gt ON gt.game_type_id = g.game_type_id
-      WHERE g.activity_id = ?
+      WHERE g.path_id = ?
       ORDER BY g.display_order
-    `, [activity_id]);
+    `, [path_id]);
 
-    return res.status(200).json(rows);
+    return res.status(200).json({
+      path_id:   path[0].path_id,
+      path_name: path[0].name,
+      games:     rows,
+    });
   } catch (error) {
-    console.error('Get games by activity error:', error);
+    console.error('Get games by path error:', error);
     return res.status(500).json({ message: 'Server error.' });
   }
 };
@@ -181,7 +190,7 @@ module.exports = {
   createGame,
   getAllGames,
   getGameById,
-  getGamesByActivity,
+  getGamesByPath,   // ← replaced getGamesByActivity
   getGameTypes,
   updateGame,
   deleteGame,
