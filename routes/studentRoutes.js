@@ -57,20 +57,21 @@ const {
   completeCheckpoint,
 } = require('../controllers/gamificationController');
 
-const { 
-  getGameDashboard, 
+const {
+  getGameDashboard,
   getAchievements,
-  getPathGames,
- } = require('../controllers/gameDashboard');
+} = require('../controllers/gameDashboard');
 
- const {
-  getAllGames,
+const {
   getGameById,
-  getGamesByPathStudent,
+  getGamesByPath,
   getGameLevels,
   playGame,
-  getPaths
- } = require('../controllers/gamesController'); 
+  getPaths,
+} = require('../controllers/gamesController');
+
+// ── Paths ─────────────────────────────────────────────────────────────────────
+router.get('/paths', auth, getPaths);
 
 // ── Activities ────────────────────────────────────────────────────────────────
 router.get ('/activities/path/:path_id',              auth, getActivitiesByPath);
@@ -83,45 +84,37 @@ router.get ('/activities/:id',                        auth, getActivityById);
 router.post('/activities/:activity_id/end',           auth, endActivity);
 
 // ── Videos ────────────────────────────────────────────────────────────────────
-router.get ('/videos/:video_id',                      auth, getVideoById);
+router.get('/videos/:video_id', auth, getVideoById);
 
 // ── Checkpoints ───────────────────────────────────────────────────────────────
-router.get ('/checkpoints/:checkpoint_id/questions',  auth, getQuestionsByCheckpoint);
-router.get ('/checkpoints/:checkpoint_id',            auth, getCheckpointById);
-router.post('/checkpoints/:checkpoint_id/submit',     auth, submitCheckpoint);
+router.get ('/checkpoints/:checkpoint_id/questions', auth, getQuestionsByCheckpoint);
+router.get ('/checkpoints/:checkpoint_id',           auth, getCheckpointById);
+router.post('/checkpoints/:checkpoint_id/submit',    auth, submitCheckpoint);
 
-// ── Spot the Difference ───────────────────────────────────────────────────────
+// ── Games — SPECIFIC routes MUST come before /:game_id wildcard ──────────────
+router.get ('/games/path/:path_id',                   auth, getGamesByPath);
+router.get ('/games/:game_id/levels',                 auth, getGameLevels);
+router.get ('/games/:game_id/play',                   auth, playGame);
 router.get ('/games/:game_id/difference',             auth, getDifferenceGame);
 router.post('/games/:game_id/difference/check',       auth, checkDifferenceSpots);
-
-// ── Pick the Right Ingredient ─────────────────────────────────────────────────
 router.get ('/games/:game_id/pick-ingredient',        auth, getPickIngredientGame);
 router.post('/games/:game_id/pick-ingredient/submit', auth, submitPickIngredient);
-
-// ── Tag the Sequence ──────────────────────────────────────────────────────────
 router.get ('/games/:game_id/sequence',               auth, getSequenceSteps);
 router.post('/games/:game_id/sequence/submit',        auth, checkSequence);
+router.get ('/games/:game_id',                        auth, getGameById); // ← wildcard LAST
 
-// ── Gamification — Sessions, Points, Badges, Leaderboard ─────────────────────
-router.post('/game-sessions',                         auth, createGameSession);
-router.get ('/game-sessions',                         auth, getMyGameSessions);
-router.get ('/leaderboard',                           auth, getLeaderboard);
-router.get ('/badges',                                auth, getMyBadges);
-router.get ('/points',                                auth, getMyPoints);
-router.post('/video-complete',                        auth, completeVideoLesson);    // ✅ added
-router.post('/checkpoint-complete',                   auth, completeCheckpoint);     // ✅ added
+// ── Gamification ──────────────────────────────────────────────────────────────
+router.post('/game-sessions',       auth, createGameSession);
+router.get ('/game-sessions',       auth, getMyGameSessions);
+router.get ('/leaderboard',         auth, getLeaderboard);
+router.get ('/badges',              auth, getMyBadges);
+router.get ('/points',              auth, getMyPoints);
+router.post('/video-complete',      auth, completeVideoLesson);
+router.post('/checkpoint-complete', auth, completeCheckpoint);
 
-// ── Game Dashboard ─────────────────────────────────────────────────────────────
-router.get('/game-dashboard',                        auth, getGameDashboard);
-router.get('/achievements',                          auth, getAchievements);
-router.get('/path-games/:path_id',                  auth, getPathGames);
-router.get('/games/:game_id/levels',                 auth, getGameLevels);
-router.get('/games/path/:path_id',                   auth, getGamesByPathStudent);  // ← get games by path for studentsget levels by path and game type
-router.get('/games/:game_id',                        auth, getGameById);
-router.get('/games/:game_id/levels',                 auth, getGameLevels);
-router.get('/games/:game_id/play',                 auth, playGame);
-router.get('/paths',                                auth, getPaths);
-
+// ── Game Dashboard ────────────────────────────────────────────────────────────
+router.get('/game-dashboard', auth, getGameDashboard);
+router.get('/achievements',   auth, getAchievements);
 
 // ── Student profile (/:id MUST be last) ──────────────────────────────────────
 router.get   ('/',    auth, getAllStudents);
