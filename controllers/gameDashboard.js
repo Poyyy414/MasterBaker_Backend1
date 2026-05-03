@@ -115,12 +115,12 @@ const getPathGames = async (req, res) => {
          g.description,
          g.time_limit,
          g.display_order,
-         gt.code      AS game_type_code,
-         gt.name      AS game_type_name
+         g.thumbnail_url,
+         gt.code AS game_type_code,
+         gt.name AS game_type_name
        FROM games g
-       JOIN activities  a  ON a.activity_id  = g.activity_id
-       JOIN game_types  gt ON gt.game_type_id = g.game_type_id
-       WHERE a.path_id = ?
+       JOIN game_types gt ON gt.game_type_id = g.game_type_id
+       WHERE g.path_id = ?
        ORDER BY g.display_order ASC`,
       [path_id]
     );
@@ -132,32 +132,30 @@ const getPathGames = async (req, res) => {
     // Fetch student's best session per game
     const gameIds = games.map(g => g.game_id);
     const [sessions] = await db.query(
-  `SELECT
-     gs.recipe_id AS game_id,
-     MAX(gs.score)                                        AS best_score,
-     MAX(gs.total_items)                                  AS best_total,
-     MAX(ROUND(gs.score / gs.total_items * 100))         AS best_percentage
-   FROM game_sessions gs
-   WHERE gs.user_id = ? AND gs.recipe_id IN (?)
-   GROUP BY gs.recipe_id`,
-  [user_id, gameIds]
-);
+      `SELECT
+         gs.recipe_id                                          AS game_id,
+         MAX(gs.score)                                         AS best_score,
+         MAX(gs.total_items)                                   AS best_total,
+         MAX(ROUND(gs.score / gs.total_items * 100))          AS best_percentage
+       FROM game_sessions gs
+       WHERE gs.user_id = ? AND gs.recipe_id IN (?)
+       GROUP BY gs.recipe_id`,
+      [user_id, gameIds]
+    );
 
 
     // Map sessions by game_id for quick lookup
     const sessionMap = {};
     for (const s of sessions) sessionMap[s.game_id] = s;
 
-    // Points config per game type (mirrors pointsConfig.js — keep in sync)
     const POINTS_MAP = {
       PICK_INGREDIENT: { per_correct: 100, time_attack_bonus: 50 },
       TAG_SEQUENCE:    { per_correct: 100, time_attack_bonus: 50 },
       SPOT_DIFFERENCE: { per_correct: 100, time_attack_bonus: 50 },
     };
 
-    // Build enriched game list and apply lock logic
     const enriched = [];
-    let previousPassed = true; // Game 1 is always unlocked
+    let previousPassed = true;
 
     for (let i = 0; i < games.length; i++) {
       const g       = games[i];
@@ -171,7 +169,6 @@ const getPathGames = async (req, res) => {
 
       const pts = POINTS_MAP[g.game_type_code] || { per_correct: 100, time_attack_bonus: 50 };
 
-      // Map game type code to the correct student play endpoint
       const ENDPOINT_MAP = {
         PICK_INGREDIENT: `/api/student/games/${g.game_id}/pick-ingredient`,
         TAG_SEQUENCE:    `/api/student/games/${g.game_id}/sequence`,
@@ -185,12 +182,13 @@ const getPathGames = async (req, res) => {
       };
 
       enriched.push({
-        game_id:           g.game_id,
-        title:             g.title,
-        description:       g.description,
-        time_limit:        g.time_limit,           // seconds; null = no limit
-        game_type_code:    g.game_type_code,
-        game_type_name:    g.game_type_name,
+        game_id:            g.game_id,
+        title:              g.title,
+        description:        g.description,
+        time_limit:         g.time_limit,
+        thumbnail_url:      g.thumbnail_url,
+        game_type_code:     g.game_type_code,
+        game_type_name:     g.game_type_name,
         points_per_correct: pts.per_correct,
         time_attack_bonus:  pts.time_attack_bonus,
         is_locked,
@@ -198,11 +196,10 @@ const getPathGames = async (req, res) => {
         best_score,
         best_total,
         best_percentage,
-        play_url:          ENDPOINT_MAP[g.game_type_code] || null,
-        submit_url:        SUBMIT_MAP[g.game_type_code]   || null,
+        play_url:   ENDPOINT_MAP[g.game_type_code] || null,
+        submit_url: SUBMIT_MAP[g.game_type_code]   || null,
       });
 
-      // Next game is unlocked only if this one is completed
       previousPassed = is_completed;
     }
 
