@@ -1,130 +1,149 @@
 const express = require('express');
 const router  = express.Router();
 
-const { verifyToken, isStudent } = require('../middleware/authMiddleware');
-const auth = [verifyToken, isStudent];
+const { verifyToken, isTeacher } = require('../middleware/authMiddleware');
+const auth = [verifyToken, isTeacher];
 
 const {
-  getAllStudents,
-  getStudentById,
-  updateStudent,
-  deleteStudent,
-} = require('../controllers/studentController');
+  getAllTeachers,
+  getTeacherById,
+  updateTeacher,
+  deleteTeacher,
+} = require('../controllers/teacherController');
 
 const {
-  getActivitiesByPath,
+  createActivity,
+  getAllActivities,
   getActivityById,
-  getVideosByActivity,
-  getVideoById,
-  getActivityLearnView,
+  updateActivity,
+  deleteActivity,
+  createVideo,
+  deleteVideo,
+  getActivitiesByPath,
 } = require('../controllers/activityController');
 
 const {
+  createCheckpoint,
+  updateCheckpoint,
+  deleteCheckpoint,
   getCheckpointsByActivity,
-  getCheckpointById,
-  submitCheckpoint,
-  getActivityProgress,
-  endActivity,
-  getNextQuestion,
 } = require('../controllers/checkpointController');
 
 const {
-  getQuestionsByCheckpoint,
+  createQuestion,
+  deleteQuestion,
 } = require('../controllers/questionController');
 
 const {
-  getDifferenceGame,
-  checkDifferenceSpots,
+  createDifferenceImage,
+  getDifferenceGameTeacher,
+  deleteDifferenceImage,
+  createDifferenceSpot,
+  updateDifferenceSpot,
+  deleteDifferenceSpot,
 } = require('../controllers/differenceController');
 
 const {
-  getPickIngredientGame,
-  submitPickIngredient,
+  getGameItemsTeacher,
+  createGameItem,
+  updateGameItem,
+  deleteGameItem,
 } = require('../controllers/gameItemsController');
 
 const {
-  getSequenceSteps,
-  checkSequence,
+  getSequenceStepsTeacher,
+  createSequenceStep,
+  updateSequenceStep,
+  deleteSequenceStep,
 } = require('../controllers/sequenceController');
 
 const {
-  createGameSession,
-  getMyGameSessions,
   getLeaderboard,
-  getMyBadges,
-  getMyPoints,
-  completeVideoLesson,
-  completeCheckpoint,
 } = require('../controllers/gamificationController');
 
-const { 
-  getGameDashboard, 
-  getAchievements,
-  getPathGames,
- } = require('../controllers/gameDashboard');
-
- const {
+const {
+  getGameTypes,
+  createGame,
   getAllGames,
   getGameById,
-  getGamesByPathStudent,
+  getGamesByPath,
   getGameLevels,
- } = require('../controllers/gamesController'); 
+  updateGame,
+  deleteGame,
+} = require('../controllers/gamesController');
 
-// ── Activities ────────────────────────────────────────────────────────────────
-router.get ('/activities/path/:path_id',              auth, getActivitiesByPath);
-router.get ('/activities/:id/learn',                  auth, getActivityLearnView);
-router.get ('/activities/:id/videos',                 auth, getVideosByActivity);
-router.get ('/activities/:id/checkpoints',            auth, getCheckpointsByActivity);
-router.get ('/activities/:activity_id/progress',      auth, getActivityProgress);
-router.get ('/activities/:activity_id/next-question', auth, getNextQuestion);
-router.get ('/activities/:id',                        auth, getActivityById);
-router.post('/activities/:activity_id/end',           auth, endActivity);
+const {
+  getStudentOverview,
+  getStudentLessonProgress,
+  getStudentGameProgress,
+  getStudentCheckpointProgress,
+} = require('../controllers/studentProgressController');
 
-// ── Videos ────────────────────────────────────────────────────────────────────
-router.get ('/videos/:video_id',                      auth, getVideoById);
+// ── Activity management ───────────────────────────────────────────────────────
+router.post  ('/activities',                            auth, createActivity);
+router.get   ('/activities',                            auth, getAllActivities);
+router.get   ('/activities/path/:path_id',              auth, getActivitiesByPath);
+router.get   ('/activities/:id/checkpoints',            auth, getCheckpointsByActivity);
+router.get   ('/activities/:id',                        auth, getActivityById);
+router.put   ('/activities/:id',                        auth, updateActivity);
+router.delete('/activities/:id',                        auth, deleteActivity);
 
-// ── Checkpoints ───────────────────────────────────────────────────────────────
-router.get ('/checkpoints/:checkpoint_id/questions',  auth, getQuestionsByCheckpoint);
-router.get ('/checkpoints/:checkpoint_id',            auth, getCheckpointById);
-router.post('/checkpoints/:checkpoint_id/submit',     auth, submitCheckpoint);
+// ── Video management ──────────────────────────────────────────────────────────
+router.post  ('/activities/:id/videos',                 auth, createVideo);
+router.delete('/videos/:video_id',                      auth, deleteVideo);
+
+// ── Checkpoint management ─────────────────────────────────────────────────────
+router.post  ('/activities/:activity_id/checkpoints',   auth, createCheckpoint);
+router.put   ('/checkpoints/:checkpoint_id',            auth, updateCheckpoint);
+router.delete('/checkpoints/:checkpoint_id',            auth, deleteCheckpoint);
+
+// ── Question management ───────────────────────────────────────────────────────
+router.post  ('/checkpoints/:checkpoint_id/questions',  auth, createQuestion);
+router.delete('/questions/:question_id',                auth, deleteQuestion);
+
+// ── Game management — specific routes BEFORE /:game_id wildcard ──────────────
+router.get   ('/game-types',                            auth, getGameTypes);
+router.get   ('/games/path/:path_id',                   auth, getGamesByPath);
+router.get   ('/games/:game_id/levels',                 auth, getGameLevels);
+router.get   ('/games/:game_id/difference',             auth, getDifferenceGameTeacher);
+router.get   ('/games/:game_id/pick-ingredient',        auth, getGameItemsTeacher);
+router.get   ('/games/:game_id/sequence',               auth, getSequenceStepsTeacher);
+router.post  ('/games',                                 auth, createGame);
+router.get   ('/games',                                 auth, getAllGames);
+router.get   ('/games/:game_id',                        auth, getGameById);
+router.put   ('/games/:game_id',                        auth, updateGame);
+router.delete('/games/:game_id',                        auth, deleteGame);
 
 // ── Spot the Difference ───────────────────────────────────────────────────────
-router.get ('/games/:game_id/difference',             auth, getDifferenceGame);
-router.post('/games/:game_id/difference/check',       auth, checkDifferenceSpots);
+router.post  ('/games/:game_id/difference',             auth, createDifferenceImage);
+router.delete('/difference/images/:image_id',           auth, deleteDifferenceImage);
+router.post  ('/difference/:image_id/spots',            auth, createDifferenceSpot);
+router.put   ('/difference/spots/:spot_id',             auth, updateDifferenceSpot);
+router.delete('/difference/spots/:spot_id',             auth, deleteDifferenceSpot);
 
 // ── Pick the Right Ingredient ─────────────────────────────────────────────────
-router.get ('/games/:game_id/pick-ingredient',        auth, getPickIngredientGame);
-router.post('/games/:game_id/pick-ingredient/submit', auth, submitPickIngredient);
+router.post  ('/games/:game_id/pick-ingredient',        auth, createGameItem);
+router.put   ('/game-items/:item_id',                   auth, updateGameItem);
+router.delete('/game-items/:item_id',                   auth, deleteGameItem);
 
 // ── Tag the Sequence ──────────────────────────────────────────────────────────
-router.get ('/games/:game_id/sequence',               auth, getSequenceSteps);
-router.post('/games/:game_id/sequence/submit',        auth, checkSequence);
+router.post  ('/games/:game_id/sequence',               auth, createSequenceStep);
+router.put   ('/sequence-steps/:step_id',               auth, updateSequenceStep);
+router.delete('/sequence-steps/:step_id',               auth, deleteSequenceStep);
 
-// ── Gamification — Sessions, Points, Badges, Leaderboard ─────────────────────
-router.post('/game-sessions',                         auth, createGameSession);
-router.get ('/game-sessions',                         auth, getMyGameSessions);
-router.get ('/leaderboard',                           auth, getLeaderboard);
-router.get ('/badges',                                auth, getMyBadges);
-router.get ('/points',                                auth, getMyPoints);
-router.post('/video-complete',                        auth, completeVideoLesson);    // ✅ added
-router.post('/checkpoint-complete',                   auth, completeCheckpoint);     // ✅ added
+// ── Student progress monitoring ───────────────────────────────────────────────
+router.get   ('/students/:student_id/overview',         auth, getStudentOverview);
+router.get   ('/students/:student_id/lessons',          auth, getStudentLessonProgress);
+router.get   ('/students/:student_id/games',            auth, getStudentGameProgress);
+router.get   ('/students/:student_id/checkpoints',      auth, getStudentCheckpointProgress);
 
-// ── Game Dashboard ─────────────────────────────────────────────────────────────
-router.get('/game-dashboard',                        auth, getGameDashboard);
-router.get('/achievements',                          auth, getAchievements);
-router.get('/path-games/:path_id',                  auth, getPathGames);
-router.get('/games/:game_id/levels',                 auth, getGameLevels);
-router.get('/games/path/:path_id',                   auth, getGamesByPathStudent);  // ← get games by path for students
-router.get('/games/levels/:path_id/:game_type_id',   auth, getGameLevels);  // ← get levels by path and game type
-router.get('/games/:game_id',                        auth, getGameById);
-router.get('/games/:game_id/levels',                 auth, getGameLevels);
+// ── Leaderboard ───────────────────────────────────────────────────────────────
+router.get   ('/leaderboard',                           auth, getLeaderboard);
 
-
-
-// ── Student profile (/:id MUST be last) ──────────────────────────────────────
-router.get   ('/',    auth, getAllStudents);
-router.get   ('/:id', auth, getStudentById);
-router.put   ('/:id', auth, updateStudent);
-router.delete('/:id', auth, deleteStudent);
+// ── Teacher profile (/:id MUST be last) ──────────────────────────────────────
+router.get   ('/',    auth, getAllTeachers);
+router.get   ('/:id', auth, getTeacherById);
+router.put   ('/:id', auth, updateTeacher);
+router.delete('/:id', auth, deleteTeacher);
 
 module.exports = router;

@@ -16,8 +16,8 @@ const getSequenceSteps = async (req, res) => {
     if (game.length === 0) return res.status(404).json({ message: 'Game not found.' });
 
     const [steps] = await db.query(
-      `SELECT step_id, step_text, step_image, question_text
-       FROM game_sequence_steps WHERE game_id = ? ORDER BY RAND()`,
+      `SELECT step_id, description AS step_text, image_url AS step_image
+       FROM game_sequence_steps WHERE recipe_id = ? ORDER BY RAND()`,
       [game_id]
     );
 
@@ -47,8 +47,9 @@ const getSequenceStepsTeacher = async (req, res) => {
     if (game.length === 0) return res.status(404).json({ message: 'Game not found.' });
 
     const [steps] = await db.query(
-      `SELECT step_id, game_id, question_text, step_text, step_image, correct_order
-       FROM game_sequence_steps WHERE game_id = ? ORDER BY correct_order`,
+      `SELECT step_id, recipe_id, description AS step_text, 
+              image_url AS step_image, correct_order
+       FROM game_sequence_steps WHERE recipe_id = ? ORDER BY correct_order`,
       [game_id]
     );
 
@@ -91,8 +92,9 @@ const checkSequence = async (req, res) => {
     const attemptNumber = await getAttemptNumber(conn, user_id, recipe_id, game_type_id);
 
     const [steps] = await conn.query(
-      `SELECT step_id, step_text, correct_order FROM game_sequence_steps WHERE game_id = ?`, [game_id]
-    );
+  `SELECT step_id, description AS step_text, correct_order 
+   FROM game_sequence_steps WHERE recipe_id = ?`, [game_id]
+);
 
     // Build lookup: step_id → correct_order
     const correctMap = {};
@@ -169,9 +171,9 @@ const createSequenceStep = async (req, res) => {
     if (game.length === 0) return res.status(404).json({ message: 'Game not found.' });
 
     const [result] = await db.query(
-      `INSERT INTO game_sequence_steps (game_id, question_text, step_text, step_image, correct_order)
-       VALUES (?, ?, ?, ?, ?)`,
-      [game_id, question_text || null, step_text, step_image || null, correct_order]
+      `INSERT INTO game_sequence_steps (recipe_id, description, image_url, correct_order)
+       VALUES (?, ?, ?, ?)`,
+      [game_id, step_text, step_image || null, correct_order]
     );
     return res.status(201).json({ message: 'Sequence step created.', step_id: result.insertId });
   } catch (error) {
@@ -184,10 +186,11 @@ const createSequenceStep = async (req, res) => {
 // UPDATE SEQUENCE STEP (teacher)
 // PUT /api/teacher/sequence-steps/:step_id
 // ════════════════════════════════════════════════════════════════════════════════
+// and fix updateSequenceStep
 const updateSequenceStep = async (req, res) => {
   try {
     const { step_id } = req.params;
-    const { question_text, step_text, step_image, correct_order } = req.body;
+    const { step_text, step_image, correct_order } = req.body;
 
     const [existing] = await db.query(
       `SELECT step_id FROM game_sequence_steps WHERE step_id = ?`, [step_id]
@@ -196,12 +199,11 @@ const updateSequenceStep = async (req, res) => {
 
     await db.query(
       `UPDATE game_sequence_steps SET
-         question_text = COALESCE(?, question_text),
-         step_text     = COALESCE(?, step_text),
-         step_image    = COALESCE(?, step_image),
+         description   = COALESCE(?, description),
+         image_url     = COALESCE(?, image_url),
          correct_order = COALESCE(?, correct_order)
        WHERE step_id = ?`,
-      [question_text ?? null, step_text ?? null, step_image ?? null, correct_order ?? null, step_id]
+      [step_text ?? null, step_image ?? null, correct_order ?? null, step_id]
     );
     return res.status(200).json({ message: 'Sequence step updated.' });
   } catch (error) {
