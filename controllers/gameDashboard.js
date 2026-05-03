@@ -43,15 +43,15 @@ const getGameDashboard = async (req, res) => {
       // Games this student has passed (score = total_items, i.e. perfect, OR percentage >= 60)
       // We track "passed" as: at least one session where score / total_items >= 0.6
       const [passedRow] = await db.query(
-        `SELECT COUNT(DISTINCT gs.game_id) AS passed
-         FROM game_sessions gs
-         JOIN games g  ON g.game_id  = gs.game_id
-         WHERE gs.user_id = ?
-           AND a.path_id  = ?
-           AND gs.score   >= (gs.total_items * 0.6)`,
-        [user_id, path.path_id]
-      );
-      path.completed_games = passedRow[0].passed;
+  `SELECT COUNT(DISTINCT gs.recipe_id) AS passed
+   FROM game_sessions gs
+   JOIN games g ON g.game_id = gs.recipe_id
+   WHERE gs.user_id = ?
+     AND g.path_id  = ?
+     AND gs.score   >= (gs.total_items * 0.6)`,
+  [user_id, path.path_id]
+);
+path.completed_games = passedRow[0].passed;
     }
 
     return res.status(200).json({ paths });
@@ -132,16 +132,17 @@ const getPathGames = async (req, res) => {
     // Fetch student's best session per game
     const gameIds = games.map(g => g.game_id);
     const [sessions] = await db.query(
-      `SELECT
-         gs.game_id,
-         MAX(gs.score)                                         AS best_score,
-         MAX(gs.total_items)                                   AS best_total,
-         MAX(ROUND(gs.score / gs.total_items * 100))          AS best_percentage
-       FROM game_sessions gs
-       WHERE gs.user_id = ? AND gs.game_id IN (?)
-       GROUP BY gs.game_id`,
-      [user_id, gameIds]
-    );
+  `SELECT
+     gs.recipe_id AS game_id,
+     MAX(gs.score)                                        AS best_score,
+     MAX(gs.total_items)                                  AS best_total,
+     MAX(ROUND(gs.score / gs.total_items * 100))         AS best_percentage
+   FROM game_sessions gs
+   WHERE gs.user_id = ? AND gs.recipe_id IN (?)
+   GROUP BY gs.recipe_id`,
+  [user_id, gameIds]
+);
+
 
     // Map sessions by game_id for quick lookup
     const sessionMap = {};
