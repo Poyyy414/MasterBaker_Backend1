@@ -67,6 +67,7 @@ const {
   getAllGames,
   getGameById,
   getGamesByPath,   // ← path not activity
+  getLevelsByPathAndType,
   updateGame,
   deleteGame,
 } = require('../controllers/gamesController');
@@ -106,6 +107,7 @@ router.get   ('/game-types',                            auth, getGameTypes);
 router.post  ('/games',                                 auth, createGame);
 router.get   ('/games',                                 auth, getAllGames);
 router.get   ('/games/path/:path_id',                   auth, getGamesByPath);  // ← get games by path
+router.get   ('/games/levels/:path_id/:game_type_id',   auth, getLevelsByPathAndType);  // ← get levels by path and game type
 router.get   ('/games/:game_id',                        auth, getGameById);
 router.put   ('/games/:game_id',                        auth, updateGame);
 router.delete('/games/:game_id',                        auth, deleteGame);

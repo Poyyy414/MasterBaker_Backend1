@@ -243,6 +243,109 @@ const getGamesByPathStudent = async (req, res) => {
   }
 };
 
+// ════════════════════════════════════════════════════════════════════════════════
+// GET LEVELS BY PATH + GAME TYPE
+// GET /api/teacher/games/path/:path_id/type/:game_type_id/levels
+// GET /api/student/games/path/:path_id/type/:game_type_id/levels
+// ════════════════════════════════════════════════════════════════════════════════
+const getLevelsByPathAndType = async (req, res) => {
+  try {
+    const { path_id, game_type_id } = req.params;
+    const user_id = req.user?.role_id || null;
+
+    const [pathRows] = await db.query(
+      `SELECT path_id, name FROM paths WHERE path_id = ?`, [path_id]
+    );
+    if (pathRows.length === 0) return res.status(404).json({ message: 'Path not found.' });
+
+    const [typeRows] = await db.query(
+      `SELECT game_type_id, code, name FROM game_types WHERE game_type_id = ?`, [game_type_id]
+    );
+    if (typeRows.length === 0) return res.status(404).json({ message: 'Game type not found.' });
+
+    const [levels] = await db.query(
+      `SELECT game_id, title, description, thumbnail_url,
+              time_limit, display_order, difficulty, level
+       FROM games
+       WHERE path_id = ? AND game_type_id = ?
+       ORDER BY level ASC`,
+      [path_id, game_type_id]
+    );
+
+    // For student — attach their best session per level
+    let sessionMap = {};
+    if (user_id) {
+      const gameIds = levels.map(g => g.game_id);
+      if (gameIds.length > 0) {
+        const [sessions] = await db.query(
+          `SELECT
+             gs.recipe_id                                        AS game_id,
+             MAX(gs.score)                                       AS best_score,
+             MAX(gs.total_items)                                 AS best_total,
+             MAX(ROUND(gs.score / gs.total_items * 100))        AS best_percentage
+           FROM game_sessions gs
+           WHERE gs.user_id = ? AND gs.recipe_id IN (?)
+           GROUP BY gs.recipe_id`,
+          [user_id, gameIds]
+        );
+        for (const s of sessions) sessionMap[s.game_id] = s;
+      }
+    }
+
+    const enriched = levels.map((g, i) => {
+      const session        = sessionMap[g.game_id] || null;
+      const best_score     = session?.best_score      ?? 0;
+      const best_total     = session?.best_total      ?? 0;
+      const best_percentage = session?.best_percentage ?? 0;
+      const is_completed   = best_percentage >= 60;
+
+      // Lock rule — level 1 always unlocked, next unlocks after prev completed
+      const prev_completed = i === 0 ? true : (sessionMap[levels[i - 1].game_id]?.best_percentage ?? 0) >= 60;
+
+      const PLAY_MAP = {
+        1: `/api/student/games/${g.game_id}/pick-ingredient`,
+        2: `/api/student/games/${g.game_id}/sequence`,
+        3: `/api/student/games/${g.game_id}/difference`,
+      };
+
+      const SUBMIT_MAP = {
+        1: `/api/student/games/${g.game_id}/pick-ingredient/submit`,
+        2: `/api/student/games/${g.game_id}/sequence/submit`,
+        3: `/api/student/games/${g.game_id}/difference/check`,
+      };
+
+      return {
+        game_id:        g.game_id,
+        title:          g.title,
+        description:    g.description,
+        thumbnail_url:  g.thumbnail_url,
+        time_limit:     g.time_limit,
+        difficulty:     g.difficulty,
+        level:          g.level,
+        is_locked:      !prev_completed,
+        is_completed,
+        best_score,
+        best_total,
+        best_percentage,
+        play_url:       PLAY_MAP[game_type_id]   || null,
+        submit_url:     SUBMIT_MAP[game_type_id] || null,
+      };
+    });
+
+    return res.status(200).json({
+      path_id:        parseInt(path_id),
+      path_name:      pathRows[0].name,
+      game_type_id:   parseInt(game_type_id),
+      game_type_code: typeRows[0].code,
+      game_type_name: typeRows[0].name,
+      levels:         enriched,
+    });
+  } catch (error) {
+    console.error('Get levels error:', error);
+    return res.status(500).json({ message: 'Server error.' });
+  }
+};
+
 module.exports = {
   createGame,
   getAllGames,
@@ -252,4 +355,5 @@ module.exports = {
   getGameTypes,
   updateGame,
   deleteGame,
+  getLevelsByPathAndType,
 };
