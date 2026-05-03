@@ -21,7 +21,7 @@ const getGameDashboard = async (req, res) => {
     // Fetch all learning paths
     const [paths] = await db.query(
       `SELECT path_id, name, description, image_url
-       FROM learning_paths
+       FROM paths
        ORDER BY path_id ASC`
     );
 
@@ -35,8 +35,7 @@ const getGameDashboard = async (req, res) => {
       const [totalRow] = await db.query(
         `SELECT COUNT(DISTINCT g.game_id) AS total
          FROM games g
-         JOIN activities a ON a.activity_id = g.activity_id
-         WHERE a.path_id = ?`,
+         WHERE g.path_id = ?`,
         [path.path_id]
       );
       path.total_games = totalRow[0].total;
@@ -47,7 +46,6 @@ const getGameDashboard = async (req, res) => {
         `SELECT COUNT(DISTINCT gs.game_id) AS passed
          FROM game_sessions gs
          JOIN games g  ON g.game_id  = gs.game_id
-         JOIN activities a ON a.activity_id = g.activity_id
          WHERE gs.user_id = ?
            AND a.path_id  = ?
            AND gs.score   >= (gs.total_items * 0.6)`,
@@ -102,7 +100,7 @@ const getPathGames = async (req, res) => {
 
     // Validate path
     const [pathRows] = await db.query(
-      `SELECT path_id, name FROM learning_paths WHERE path_id = ?`, [path_id]
+      `SELECT path_id, name FROM paths WHERE path_id = ?`, [path_id]
     );
     if (pathRows.length === 0) return res.status(404).json({ message: 'Path not found.' });
     const path = pathRows[0];
@@ -249,8 +247,7 @@ const getAchievements = async (req, res) => {
 
     const [badges] = await db.query(
       `SELECT b.badge_id, b.name, b.description, b.icon_url, ub.earned_at
-       FROM user_badges ub
-       JOIN badges b ON ub.badge_id = b.badge_id
+       FROM badges ub
        WHERE ub.user_id = ?
        ORDER BY ub.earned_at DESC`,
       [user_id]

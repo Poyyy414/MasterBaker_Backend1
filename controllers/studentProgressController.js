@@ -8,7 +8,7 @@ const _getStudentInfo = async (studentId) => {
     `SELECT u.user_id, u.firstname, u.lastname, u.email, s.student_id
      FROM users u
      JOIN students s ON s.user_id = u.user_id
-     WHERE u.user_id = ? AND u.role = 'student'`,
+     WHERE s.student_id = ? AND u.role = 'student'`,
     [studentId]
   );
   return rows[0] || null;
@@ -393,8 +393,11 @@ const getStudentGameProgress = async (req, res) => {
       `SELECT game_type_id, code, name FROM game_types ORDER BY game_type_id`
     );
     const [allGames] = await db.query(
-      `SELECT game_id, title, description, time_limit, order_index
-       FROM games ORDER BY order_index`
+        `SELECT g.game_id, g.title, g.description, g.time_limit, 
+          g.display_order, g.path_id, p.name AS path_name
+   FROM games g
+   JOIN paths p ON p.path_id = g.path_id
+   ORDER BY g.path_id, g.display_order`
     );
 
     const gameTypeResults = [];

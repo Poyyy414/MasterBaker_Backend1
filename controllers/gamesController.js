@@ -14,7 +14,7 @@ const createGame = async (req, res) => {
     }
 
     const [path] = await db.query(
-      `SELECT path_id FROM learning_paths WHERE path_id = ?`, [path_id]
+      `SELECT path_id FROM paths WHERE path_id = ?`, [path_id]
     );
     if (path.length === 0) return res.status(404).json({ message: 'Learning path not found.' });
 
