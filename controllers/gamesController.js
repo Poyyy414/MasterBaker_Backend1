@@ -463,7 +463,7 @@ const playGame = async (req, res) => {
     switch (game.game_type_code) {
       case 'PICK_INGREDIENT': {
         const [items] = await db.query(
-          `SELECT item_id, name, item_image, question_text
+          `SELECT item_id, name, image_url, question_text
            FROM game_items WHERE game_id = ? ORDER BY RAND()`,
           [game_id]
         );
