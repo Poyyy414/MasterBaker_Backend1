@@ -18,7 +18,7 @@ const createDifferenceImage = async (req, res) => {
     if (game.length === 0) return res.status(404).json({ message: 'Game not found.' });
 
     const [result] = await db.query(
-      `INSERT INTO game_difference_images (game_id, original_image_url, modified_image_url)
+      `INSERT INTO game_difference_images (recipe_id, image_a_url, image_b_url)
        VALUES (?, ?, ?)`,
       [game_id, original_image_url, modified_image_url]
     );
@@ -40,12 +40,12 @@ const getDifferenceGameTeacher = async (req, res) => {
     if (game.length === 0) return res.status(404).json({ message: 'Game not found.' });
 
     const [images] = await db.query(
-      `SELECT image_id, original_image_url, modified_image_url
-       FROM game_difference_images WHERE game_id = ?`, [game_id]
+      `SELECT image_id, image_a_url AS original_image_url, image_b_url AS modified_image_url
+       FROM game_difference_images WHERE recipe_id = ?`, [game_id]
     );
     for (const img of images) {
       const [spots] = await db.query(
-        `SELECT spot_id, x_percent, y_percent, radius_percent, label
+        `SELECT spot_id, x_percent, y_percent, radius AS radius_percent
          FROM game_difference_spots WHERE image_id = ?`, [img.image_id]
       );
       img.spots = spots;
@@ -96,9 +96,9 @@ const createDifferenceSpot = async (req, res) => {
     if (image.length === 0) return res.status(404).json({ message: 'Difference image not found.' });
 
     const [result] = await db.query(
-      `INSERT INTO game_difference_spots (image_id, x_percent, y_percent, radius_percent, label)
-       VALUES (?, ?, ?, ?, ?)`,
-      [image_id, x_percent, y_percent, radius_percent, label || null]
+      `INSERT INTO game_difference_spots (image_id, x_percent, y_percent, radius)
+       VALUES (?, ?, ?, ?)`,
+      [image_id, x_percent, y_percent, radius_percent]
     );
     return res.status(201).json({ message: 'Difference spot created.', spot_id: result.insertId });
   } catch (error) {
@@ -114,7 +114,7 @@ const createDifferenceSpot = async (req, res) => {
 const updateDifferenceSpot = async (req, res) => {
   try {
     const { spot_id } = req.params;
-    const { x_percent, y_percent, radius_percent, label } = req.body;
+    const { x_percent, y_percent, radius_percent } = req.body;
 
     const [existing] = await db.query(
       `SELECT spot_id FROM game_difference_spots WHERE spot_id = ?`, [spot_id]
@@ -123,12 +123,11 @@ const updateDifferenceSpot = async (req, res) => {
 
     await db.query(
       `UPDATE game_difference_spots SET
-         x_percent      = COALESCE(?, x_percent),
-         y_percent      = COALESCE(?, y_percent),
-         radius_percent = COALESCE(?, radius_percent),
-         label          = COALESCE(?, label)
+         x_percent = COALESCE(?, x_percent),
+         y_percent = COALESCE(?, y_percent),
+         radius    = COALESCE(?, radius)
        WHERE spot_id = ?`,
-      [x_percent ?? null, y_percent ?? null, radius_percent ?? null, label ?? null, spot_id]
+      [x_percent ?? null, y_percent ?? null, radius_percent ?? null, spot_id]
     );
     return res.status(200).json({ message: 'Difference spot updated.' });
   } catch (error) {
@@ -170,8 +169,8 @@ const getDifferenceGame = async (req, res) => {
     if (game.length === 0) return res.status(404).json({ message: 'Game not found.' });
 
     const [images] = await db.query(
-      `SELECT image_id, original_image_url, modified_image_url
-       FROM game_difference_images WHERE game_id = ?`, [game_id]
+      `SELECT image_id, image_a_url AS original_image_url, image_b_url AS modified_image_url
+       FROM game_difference_images WHERE recipe_id = ?`, [game_id]
     );
     if (images.length === 0) return res.status(404).json({ message: 'No images found for this game.' });
 
@@ -183,8 +182,11 @@ const getDifferenceGame = async (req, res) => {
     }
 
     return res.status(200).json({
-      game_id: game[0].game_id, title: game[0].title,
-      description: game[0].description, time_limit: game[0].time_limit, images,
+      game_id:     game[0].game_id,
+      title:       game[0].title,
+      description: game[0].description,
+      time_limit:  game[0].time_limit,
+      images,
     });
   } catch (error) {
     console.error('Get difference game error:', error);
@@ -195,17 +197,16 @@ const getDifferenceGame = async (req, res) => {
 // ════════════════════════════════════════════════════════════════════════════════
 // CHECK DIFFERENCE SPOTS (student submission)
 // POST /api/student/games/:game_id/difference/check
-// NOTE: game_id is used as recipe_id (no separate recipes table)
 // ════════════════════════════════════════════════════════════════════════════════
 const checkDifferenceSpots = async (req, res) => {
   const conn = await db.getConnection();
   try {
     await conn.beginTransaction();
 
-    const { game_id }                              = req.params;
-    const user_id                                  = req.user.role_id;
+    const { game_id }                                       = req.params;
+    const user_id                                           = req.user.role_id;
     const { image_id, clicked_spots = [], on_time = false } = req.body;
-    const recipe_id                                = parseInt(game_id); // no recipes table
+    const recipe_id                                         = parseInt(game_id);
 
     if (!image_id) return res.status(400).json({ message: 'image_id is required.' });
 
@@ -218,7 +219,7 @@ const checkDifferenceSpots = async (req, res) => {
     const attemptNumber = await getAttemptNumber(conn, user_id, recipe_id, game_type_id);
 
     const [answerSpots] = await conn.query(
-      `SELECT spot_id, x_percent, y_percent, radius_percent, label
+      `SELECT spot_id, x_percent, y_percent, radius AS radius_percent
        FROM game_difference_spots WHERE image_id = ?`, [image_id]
     );
 
@@ -232,7 +233,7 @@ const checkDifferenceSpots = async (req, res) => {
         const dy = y_percent - spot.y_percent;
         if (Math.sqrt(dx * dx + dy * dy) <= spot.radius_percent) {
           foundSpotIds.add(spot.spot_id);
-          return { x_percent, y_percent, hit: true, spot_id: spot.spot_id, label: spot.label };
+          return { x_percent, y_percent, hit: true, spot_id: spot.spot_id };
         }
       }
       return { x_percent, y_percent, hit: false };
@@ -258,11 +259,19 @@ const checkDifferenceSpots = async (req, res) => {
     await conn.commit();
 
     return res.status(200).json({
-      message: 'Spots checked.',
-      score: correctCount, total, percentage, passed,
-      attempt_number: attemptNumber, try_again_penalty: attemptNumber > 1,
-      raw_points: rawPoints, points_earned, on_time,
-      click_results, answer_spots: answerSpots, badges_earned,
+      message:           'Spots checked.',
+      score:             correctCount,
+      total,
+      percentage,
+      passed,
+      attempt_number:    attemptNumber,
+      try_again_penalty: attemptNumber > 1,
+      raw_points:        rawPoints,
+      points_earned,
+      on_time,
+      click_results,
+      answer_spots:      answerSpots,
+      badges_earned,
     });
   } catch (error) {
     await conn.rollback();
@@ -274,7 +283,12 @@ const checkDifferenceSpots = async (req, res) => {
 };
 
 module.exports = {
-  createDifferenceImage, getDifferenceGameTeacher, deleteDifferenceImage,
-  createDifferenceSpot,  updateDifferenceSpot,     deleteDifferenceSpot,
-  getDifferenceGame,     checkDifferenceSpots,
+  createDifferenceImage,
+  getDifferenceGameTeacher,
+  deleteDifferenceImage,
+  createDifferenceSpot,
+  updateDifferenceSpot,
+  deleteDifferenceSpot,
+  getDifferenceGame,
+  checkDifferenceSpots,
 };
