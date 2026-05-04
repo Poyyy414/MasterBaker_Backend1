@@ -397,37 +397,67 @@ const playGame = async (req, res) => {
     if (gameRows.length === 0) return res.status(404).json({ message: 'Game not found.' });
     const game = gameRows[0];
 
-    // ── Lock check — only applies to child games ───────────────────────────────
-    if (game.parent_game_id) {
-      const [siblings] = await db.query(
-        `SELECT game_id, display_order FROM games
+    // ── If parent game → find first unlocked child and play it ────────────────
+    if (!game.parent_game_id) {
+      const [children] = await db.query(
+        `SELECT game_id FROM games
          WHERE parent_game_id = ?
          ORDER BY display_order ASC`,
-        [game.parent_game_id]
+        [game_id]
       );
 
-      const myIndex = siblings.findIndex(s => s.game_id === parseInt(game_id));
-      if (myIndex > 0) {
-        const prevGameId = siblings[myIndex - 1].game_id;
-        const [prevSession] = await db.query(
+      if (children.length === 0) {
+        return res.status(404).json({ message: 'No levels created for this game yet.' });
+      }
+
+      let targetGameId = children[0].game_id;
+
+      for (let i = 1; i < children.length; i++) {
+        const prevId = children[i - 1].game_id;
+        const [prev] = await db.query(
           `SELECT MAX(ROUND(score / total_items * 100)) AS best_pct
-           FROM game_sessions
-           WHERE user_id = ? AND recipe_id = ?`,
-          [user_id, prevGameId]
+           FROM game_sessions WHERE user_id = ? AND recipe_id = ?`,
+          [user_id, prevId]
         );
-        const prevPct = prevSession[0]?.best_pct ?? 0;
-        if (prevPct < 60) {
-          return res.status(403).json({
-            message:          'This level is locked. Complete the previous level first.',
-            required_game_id: prevGameId,
-            your_best:        prevPct,
-            required:         60,
-          });
+        if ((prev[0]?.best_pct ?? 0) >= 60) {
+          targetGameId = children[i].game_id;
+        } else {
+          break;
         }
+      }
+
+      req.params.game_id = targetGameId;
+      return playGame(req, res);
+    }
+
+    // ── Lock check — only for child games ─────────────────────────────────────
+    const [siblings] = await db.query(
+      `SELECT game_id FROM games
+       WHERE parent_game_id = ?
+       ORDER BY display_order ASC`,
+      [game.parent_game_id]
+    );
+
+    const myIndex = siblings.findIndex(s => s.game_id === parseInt(game_id));
+    if (myIndex > 0) {
+      const prevGameId = siblings[myIndex - 1].game_id;
+      const [prevSession] = await db.query(
+        `SELECT MAX(ROUND(score / total_items * 100)) AS best_pct
+         FROM game_sessions WHERE user_id = ? AND recipe_id = ?`,
+        [user_id, prevGameId]
+      );
+      const prevPct = prevSession[0]?.best_pct ?? 0;
+      if (prevPct < 60) {
+        return res.status(403).json({
+          message:          'This level is locked. Complete the previous level first.',
+          required_game_id: prevGameId,
+          your_best:        prevPct,
+          required:         60,
+        });
       }
     }
 
-    // ── Load game content based on type ───────────────────────────────────────
+    // ── Load content ──────────────────────────────────────────────────────────
     let content = {};
 
     switch (game.game_type_code) {
@@ -473,7 +503,7 @@ const playGame = async (req, res) => {
       }
     }
 
-    // ── My stats ───────────────────────────────────────────────────────────────
+    // ── My stats ──────────────────────────────────────────────────────────────
     const [[stats]] = await db.query(
       `SELECT MAX(score) AS best_score,
               MAX(total_items) AS best_total,
