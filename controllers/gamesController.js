@@ -462,17 +462,17 @@ const playGame = async (req, res) => {
 
     switch (game.game_type_code) {
       case 'PICK_INGREDIENT': {
-        const [items] = await db.query(
-          `SELECT item_id, name, image_url, question_text
-           FROM game_items WHERE game_id = ? ORDER BY RAND()`,
-          [game_id]
-        );
-        content = {
-          question: items[0]?.question_text || 'Pick the correct ingredients.',
-          items,
-        };
-        break;
-      }
+  const [items] = await db.query(
+    `SELECT item_id, name, image_url, is_correct
+     FROM game_items WHERE recipe_id = ? ORDER BY RAND()`,  // recipe_id, not game_id
+    [game_id]
+  );
+  content = {
+    question: 'Pick the correct ingredients.',
+    items,
+  };
+  break;
+}
       case 'TAG_SEQUENCE': {
         const [steps] = await db.query(
           `SELECT step_id, description AS step_text, image_url AS step_image
