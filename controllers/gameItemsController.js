@@ -3,7 +3,7 @@ const { POINTS, applyTryAgain }         = require('./pointsConfig');
 const { getAttemptNumber, awardBadges } = require('./gamificationController');
 
 // ════════════════════════════════════════════════════════════════════════════════
-// GET ALL ITEMS (teacher — includes is_correct, for content management)
+// GET ALL ITEMS (teacher — includes is_correct)
 // GET /api/teacher/games/:game_id/pick-ingredient
 // ════════════════════════════════════════════════════════════════════════════════
 const getGameItemsTeacher = async (req, res) => {
@@ -13,8 +13,9 @@ const getGameItemsTeacher = async (req, res) => {
     if (game.length === 0) return res.status(404).json({ message: 'Game not found.' });
 
     const [items] = await db.query(
-      `SELECT item_id, game_id, question_text, item_text, item_image, is_correct, order_index
-       FROM game_items WHERE game_id = ? ORDER BY order_index`,
+      `SELECT item_id, recipe_id AS game_id, name AS item_text,
+              image_url AS item_image, is_correct
+       FROM game_items WHERE recipe_id = ? ORDER BY item_id`,
       [game_id]
     );
     return res.status(200).json({ game_id: game[0].game_id, title: game[0].title, items });
@@ -27,12 +28,12 @@ const getGameItemsTeacher = async (req, res) => {
 // ════════════════════════════════════════════════════════════════════════════════
 // CREATE GAME ITEM (teacher)
 // POST /api/teacher/games/:game_id/pick-ingredient
-// Body: { question_text?, item_text, item_image?, is_correct?, order_index? }
+// Body: { item_text, item_image?, is_correct?, question_text? }
 // ════════════════════════════════════════════════════════════════════════════════
 const createGameItem = async (req, res) => {
   try {
     const { game_id } = req.params;
-    const { question_text, item_text, item_image, is_correct = false, order_index = 0 } = req.body;
+    const { item_text, item_image, is_correct = false } = req.body;
 
     if (!item_text) return res.status(400).json({ message: 'item_text is required.' });
 
@@ -40,9 +41,9 @@ const createGameItem = async (req, res) => {
     if (game.length === 0) return res.status(404).json({ message: 'Game not found.' });
 
     const [result] = await db.query(
-      `INSERT INTO game_items (game_id, question_text, item_text, item_image, is_correct, order_index)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [game_id, question_text || null, item_text, item_image || null, is_correct ? 1 : 0, order_index]
+      `INSERT INTO game_items (recipe_id, name, image_url, is_correct)
+       VALUES (?, ?, ?, ?)`,
+      [game_id, item_text, item_image || null, is_correct ? 1 : 0]
     );
     return res.status(201).json({ message: 'Game item created.', item_id: result.insertId });
   } catch (error) {
@@ -58,21 +59,19 @@ const createGameItem = async (req, res) => {
 const updateGameItem = async (req, res) => {
   try {
     const { item_id } = req.params;
-    const { question_text, item_text, item_image, is_correct, order_index } = req.body;
+    const { item_text, item_image, is_correct } = req.body;
 
     const [existing] = await db.query(`SELECT item_id FROM game_items WHERE item_id = ?`, [item_id]);
     if (existing.length === 0) return res.status(404).json({ message: 'Game item not found.' });
 
     await db.query(
       `UPDATE game_items SET
-         question_text = COALESCE(?, question_text),
-         item_text     = COALESCE(?, item_text),
-         item_image    = COALESCE(?, item_image),
-         is_correct    = COALESCE(?, is_correct),
-         order_index   = COALESCE(?, order_index)
+         name       = COALESCE(?, name),
+         image_url  = COALESCE(?, image_url),
+         is_correct = COALESCE(?, is_correct)
        WHERE item_id = ?`,
-      [question_text ?? null, item_text ?? null, item_image ?? null,
-       is_correct != null ? (is_correct ? 1 : 0) : null, order_index ?? null, item_id]
+      [item_text ?? null, item_image ?? null,
+       is_correct != null ? (is_correct ? 1 : 0) : null, item_id]
     );
     return res.status(200).json({ message: 'Game item updated.' });
   } catch (error) {
@@ -112,8 +111,8 @@ const getPickIngredientGame = async (req, res) => {
     if (game.length === 0) return res.status(404).json({ message: 'Game not found.' });
 
     const [items] = await db.query(
-      `SELECT item_id, item_text, item_image, question_text, order_index
-       FROM game_items WHERE game_id = ? ORDER BY RAND()`,
+      `SELECT item_id, name AS item_text, image_url AS item_image
+       FROM game_items WHERE recipe_id = ? ORDER BY RAND()`,
       [game_id]
     );
     return res.status(200).json({
@@ -121,7 +120,7 @@ const getPickIngredientGame = async (req, res) => {
       title:       game[0].title,
       description: game[0].description,
       time_limit:  game[0].time_limit,
-      question:    items[0]?.question_text || 'Pick the right ingredients.',
+      question:    'Pick the correct ingredients.',
       items,
     });
   } catch (error) {
@@ -133,11 +132,7 @@ const getPickIngredientGame = async (req, res) => {
 // ════════════════════════════════════════════════════════════════════════════════
 // SUBMIT ANSWER — Pick the Right Ingredient
 // POST /api/student/games/:game_id/pick-ingredient/submit
-//
-// Body:
-//   selected_item_ids  INT[]
-//   recipe_id          INT
-//   on_time            BOOL
+// Body: { selected_item_ids: INT[], recipe_id: INT, on_time: BOOL }
 // ════════════════════════════════════════════════════════════════════════════════
 const submitPickIngredient = async (req, res) => {
   const conn = await db.getConnection();
@@ -162,20 +157,20 @@ const submitPickIngredient = async (req, res) => {
     const attemptNumber = await getAttemptNumber(conn, user_id, recipe_id, game_type_id);
 
     const [correctItems] = await conn.query(
-      `SELECT item_id FROM game_items WHERE game_id = ? AND is_correct = 1`, [game_id]
+      `SELECT item_id FROM game_items WHERE recipe_id = ? AND is_correct = 1`, [game_id]
     );
     const [allItems] = await conn.query(
-      `SELECT item_id, item_text, is_correct FROM game_items WHERE game_id = ?`, [game_id]
+      `SELECT item_id, name AS item_text, is_correct FROM game_items WHERE recipe_id = ?`, [game_id]
     );
 
-    const correctIds   = correctItems.map(i => i.item_id);
-    const correctCount = selected_item_ids.filter(id => correctIds.includes(id)).length;
-    const wrongCount   = selected_item_ids.filter(id => !correctIds.includes(id)).length;
-    const total        = correctIds.length;
-    const percentage   = total > 0 ? Math.round((correctCount / total) * 100) : 0;
-    const passed       = percentage >= 60;
+    const correctIds    = correctItems.map(i => i.item_id);
+    const correctCount  = selected_item_ids.filter(id => correctIds.includes(id)).length;
+    const wrongCount    = selected_item_ids.filter(id => !correctIds.includes(id)).length;
+    const total         = correctIds.length;
+    const percentage    = total > 0 ? Math.round((correctCount / total) * 100) : 0;
+    const passed        = percentage >= 60;
 
-    const rawPoints    = correctCount * POINTS.PTRI_CORRECT_INGREDIENT + (on_time ? POINTS.PTRI_TIME_ATTACK_BONUS : 0);
+    const rawPoints     = correctCount * POINTS.PTRI_CORRECT_INGREDIENT + (on_time ? POINTS.PTRI_TIME_ATTACK_BONUS : 0);
     const points_earned = applyTryAgain(rawPoints, attemptNumber);
 
     const [result] = await conn.query(
@@ -183,15 +178,13 @@ const submitPickIngredient = async (req, res) => {
        VALUES (?, ?, ?, ?, ?, ?)`,
       [user_id, recipe_id, game_type_id, correctCount, total, points_earned]
     );
-    const session_id = result.insertId;
 
     await conn.query(
       `INSERT INTO points_log (user_id, session_id, points_earned) VALUES (?, ?, ?)`,
-      [user_id, session_id, points_earned]
+      [user_id, result.insertId, points_earned]
     );
 
     const badges_earned = await awardBadges(conn, user_id, correctCount, total);
-
     await conn.commit();
 
     const results = allItems.map(item => ({

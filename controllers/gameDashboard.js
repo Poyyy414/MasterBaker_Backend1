@@ -243,13 +243,14 @@ const getAchievements = async (req, res) => {
       [user_id]
     );
 
-    const [badges] = await db.query(
-      `SELECT b.badge_id, b.name, b.description, b.icon_url, ub.earned_at
-       FROM badges ub
-       WHERE ub.user_id = ?
-       ORDER BY ub.earned_at DESC`,
-      [user_id]
-    );
+   const [badges] = await db.query(
+  `SELECT b.badge_id, b.name, b.description, b.icon_url, ub.earned_at
+   FROM user_badges ub
+   JOIN badges b ON b.badge_id = ub.badge_id
+   WHERE ub.user_id = ?
+   ORDER BY ub.earned_at DESC`,
+  [user_id]
+);
 
     return res.status(200).json({
       total_points:  pointsRow.total_points,
