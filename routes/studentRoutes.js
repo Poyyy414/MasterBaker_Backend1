@@ -64,7 +64,7 @@ const {
 
 const {
   getGameById,
-  getGamesByPath,
+  getGamesByPathStudent,
   getGameLevels,
   playGame,
   getPaths,
@@ -92,7 +92,7 @@ router.get ('/checkpoints/:checkpoint_id',           auth, getCheckpointById);
 router.post('/checkpoints/:checkpoint_id/submit',    auth, submitCheckpoint);
 
 // ── Games — SPECIFIC routes MUST come before /:game_id wildcard ──────────────
-router.get ('/games/path/:path_id',                   auth, getGamesByPath);
+router.get ('/games/path/:path_id',                   auth, getGamesByPathStudent);
 router.get ('/games/:game_id/levels',                 auth, getGameLevels);
 router.get ('/games/:game_id/play',                   auth, playGame);
 router.get ('/games/:game_id/difference',             auth, getDifferenceGame);
