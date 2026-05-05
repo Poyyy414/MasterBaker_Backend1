@@ -335,24 +335,44 @@ const getLeaderboard = async (req, res) => {
   try {
     const [rows] = await db.query(`
       SELECT
-        u.user_id,
-        u.firstname,
-        u.lastname,
-        COALESCE(SUM(pl.points_earned), 0)          AS total_points,
-        COUNT(DISTINCT gs.session_id)                AS games_played,
-        COUNT(DISTINCT CASE WHEN sp.is_completed = 1
-              THEN sp.activity_id END)               AS lessons_completed,
+        ranked.user_id,
+        ranked.firstname,
+        ranked.lastname,
+        ranked.total_points,
+        ranked.games_played,
+        ranked.lessons_completed,
         RANK() OVER (
-          ORDER BY COALESCE(SUM(pl.points_earned), 0) DESC
-        )                                            AS rank_position
-      FROM users u
-      LEFT JOIN points_log      pl ON pl.user_id     = u.user_id
-      LEFT JOIN game_sessions   gs ON gs.user_id     = u.user_id
-      LEFT JOIN students         s ON s.user_id      = u.user_id
-      LEFT JOIN student_progress sp ON sp.student_id = s.student_id
-      WHERE u.role = 'student'
-      GROUP BY u.user_id, u.firstname, u.lastname
-      ORDER BY total_points DESC
+          ORDER BY ranked.total_points DESC
+        ) AS rank_position
+      FROM (
+        SELECT
+          u.user_id,
+          u.firstname,
+          u.lastname,
+          CAST(COALESCE(points.total_points, 0) AS UNSIGNED) AS total_points,
+          COALESCE(games.games_played, 0)                    AS games_played,
+          COALESCE(lessons.lessons_completed, 0)             AS lessons_completed
+        FROM users u
+        JOIN students s ON s.user_id = u.user_id
+        LEFT JOIN (
+          SELECT user_id AS student_id, SUM(points_earned) AS total_points
+          FROM points_log
+          GROUP BY user_id
+        ) points ON points.student_id = s.student_id
+        LEFT JOIN (
+          SELECT user_id AS student_id, COUNT(*) AS games_played
+          FROM game_sessions
+          GROUP BY user_id
+        ) games ON games.student_id = s.student_id
+        LEFT JOIN (
+          SELECT student_id, COUNT(DISTINCT activity_id) AS lessons_completed
+          FROM student_progress
+          WHERE is_completed = 1
+          GROUP BY student_id
+        ) lessons ON lessons.student_id = s.student_id
+        WHERE u.role = 'student'
+      ) ranked
+      ORDER BY ranked.total_points DESC, ranked.user_id ASC
     `);
     return res.status(200).json(rows);
   } catch (error) {
