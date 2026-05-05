@@ -110,3 +110,15 @@ router.get ('/game-sessions',       auth, getMyGameSessions);
 router.get ('/leaderboard',         auth, getLeaderboard);
 router.get ('/badges',              auth, getMyBadges);
 router.get ('/points',              auth, getMyPoints);
+router.post('/video-complete',      auth, completeVideoLesson);
+router.post('/checkpoint-complete', auth, completeCheckpoint);
+
+router.get('/game-dashboard', auth, getGameDashboard);
+router.get('/achievements',   auth, getAchievements);
+
+router.get   ('/',    auth, getAllStudents);
+router.get   ('/:id', auth, getStudentById);
+router.put   ('/:id', auth, updateStudent);
+router.delete('/:id', auth, deleteStudent);
+
+module.exports = router;
