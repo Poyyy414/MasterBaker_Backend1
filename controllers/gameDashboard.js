@@ -243,7 +243,7 @@ const getAchievements = async (req, res) => {
       [user_id]
     );
 
-   const [badges] = await db.query(
+  const [badges] = await db.query(
   `SELECT b.badge_id, b.name, b.description, b.icon_url, ub.earned_at
    FROM user_badges ub
    JOIN badges b ON b.badge_id = ub.badge_id

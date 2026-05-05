@@ -4,11 +4,11 @@ const { POINTS, applyTryAgain } = require('./pointsConfig');
 // ════════════════════════════════════════════════════════════════════════════════
 // INTERNAL HELPERS — exported for use by game controllers
 // ════════════════════════════════════════════════════════════════════════════════
-const getAttemptNumber = async (conn, user_id, recipe_id, game_type_id) => {
+const getAttemptNumber = async (conn, user_id, game_id, game_type_id) => {
   const [rows] = await conn.query(
     `SELECT COUNT(*) AS cnt FROM game_sessions
-     WHERE user_id = ? AND recipe_id = ? AND game_type_id = ?`,
-    [user_id, recipe_id, game_type_id]
+     WHERE user_id = ? AND game_id = ? AND game_type_id = ?`,
+    [user_id, game_id, game_type_id]
   );
   return (rows[0].cnt || 0) + 1;
 };
@@ -76,11 +76,11 @@ const createGameSession = async (req, res) => {
     await conn.beginTransaction();
 
     const user_id = req.user.role_id;
-    const { recipe_id, game_type_id, score, total_items, on_time = false } = req.body;
+    const { game_id, game_type_id, score, total_items, on_time = false } = req.body;
 
-    if (!recipe_id || !game_type_id || score == null || !total_items) {
+    if (!game_id || !game_type_id || score == null || !total_items) {
       return res.status(400).json({
-        message: 'recipe_id, game_type_id, score, and total_items are required.',
+        message: 'game_id, game_type_id, score, and total_items are required.',
       });
     }
 
@@ -90,7 +90,7 @@ const createGameSession = async (req, res) => {
     if (gtRows.length === 0) return res.status(400).json({ message: 'Invalid game_type_id.' });
     const gameCode = gtRows[0].code;
 
-    const attemptNumber = await getAttemptNumber(conn, user_id, recipe_id, game_type_id);
+    const attemptNumber = await getAttemptNumber(conn, user_id, game_id, game_type_id);
 
     let rawPoints = 0;
     if (gameCode === 'PICK_INGREDIENT') {
@@ -104,9 +104,9 @@ const createGameSession = async (req, res) => {
     const points_earned = applyTryAgain(rawPoints, attemptNumber);
 
     const [result] = await conn.query(
-      `INSERT INTO game_sessions (user_id, recipe_id, game_type_id, score, total_items, points_earned)
+      `INSERT INTO game_sessions (user_id, game_id, game_type_id, score, total_items, points_earned)
        VALUES (?, ?, ?, ?, ?, ?)`,
-      [user_id, recipe_id, game_type_id, score, total_items, points_earned]
+      [user_id, game_id, game_type_id, score, total_items, points_earned]
     );
     const session_id = result.insertId;
 
