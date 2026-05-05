@@ -60,7 +60,7 @@ const buildActivityProgressSummary = async (conn, student_id, activity_id) => {
 
 const persistActivityProgress = async (conn, student_id, activity_id, summary, finalize = false) => {
   const [existingRows] = await conn.query(
-    `SELECT progress_id, is_completed
+    `SELECT progress_id, is_completed, score, completed_at
      FROM student_progress
      WHERE student_id = ? AND activity_id = ?
      FOR UPDATE`,
@@ -115,6 +115,179 @@ const persistActivityProgress = async (conn, student_id, activity_id, summary, f
 // trigger_timestamp = seconds into the video when the video pauses and
 //                     questions pop up. e.g. 120 = pause at 2:00
 // ════════════════════════════════════════════════════════════════════════════════
+const normalizeGivenAnswer = (givenAnswer) => {
+  if (Array.isArray(givenAnswer)) return givenAnswer.join(',');
+
+  if (givenAnswer && typeof givenAnswer === 'object') {
+    return Object.entries(givenAnswer)
+      .map(([left, right]) => `${left}:${right}`)
+      .join(',');
+  }
+
+  return givenAnswer == null ? '' : String(givenAnswer);
+};
+
+const normalizeSubmittedAnswers = (body = {}) => {
+  if (Array.isArray(body.answers)) return body.answers;
+
+  if (body.answers && typeof body.answers === 'object') {
+    return Object.entries(body.answers).map(([question_id, given_answer]) => ({
+      question_id,
+      given_answer,
+    }));
+  }
+
+  if (Array.isArray(body.checkpoints)) {
+    return body.checkpoints.flatMap(cp => Array.isArray(cp.answers) ? cp.answers : []);
+  }
+
+  return [];
+};
+
+const splitAnswerList = (answer) =>
+  normalizeGivenAnswer(answer)
+    .split(',')
+    .map(a => a.toLowerCase().trim())
+    .filter(Boolean)
+    .sort();
+
+const parseMatchingPairs = (answer) =>
+  normalizeGivenAnswer(answer)
+    .split(',')
+    .map(pair => {
+      const separatorIndex = pair.indexOf(':');
+      if (separatorIndex === -1) return [null, null];
+      return [
+        pair.slice(0, separatorIndex).toLowerCase().trim(),
+        pair.slice(separatorIndex + 1).toLowerCase().trim(),
+      ];
+    })
+    .filter(([left, right]) => left && right);
+
+const scoreQuestionAnswer = async (conn, question_id, givenAnswer) => {
+  const [qRows] = await conn.query(
+    `SELECT question_type FROM questions WHERE question_id = ?`,
+    [question_id]
+  );
+  if (qRows.length === 0) return null;
+
+  const { question_type } = qRows[0];
+  const normalizedAnswer = normalizeGivenAnswer(givenAnswer);
+
+  switch (question_type) {
+    case 'multiple_choice': {
+      const [allOptions] = await conn.query(
+        `SELECT option_text, is_correct FROM question_options WHERE question_id = ?`,
+        [question_id]
+      );
+      const correctAnswers = allOptions
+        .filter(o => o.is_correct === 1)
+        .map(o => o.option_text.toLowerCase().trim())
+        .sort();
+      const givenAnswers = splitAnswerList(normalizedAnswer);
+      return JSON.stringify(correctAnswers) === JSON.stringify(givenAnswers) ? 1 : 0;
+    }
+    case 'true_or_false': {
+      const [tf] = await conn.query(
+        `SELECT correct_answer FROM question_tf_answers WHERE question_id = ?`,
+        [question_id]
+      );
+      return tf.length > 0 &&
+        tf[0].correct_answer.toLowerCase().trim() === normalizedAnswer.toLowerCase().trim() ? 1 : 0;
+    }
+    case 'identification': {
+      const [ident] = await conn.query(
+        `SELECT correct_answer FROM question_identification_answers WHERE question_id = ?`,
+        [question_id]
+      );
+      return ident.length > 0 &&
+        ident[0].correct_answer.toLowerCase().trim() === normalizedAnswer.toLowerCase().trim() ? 1 : 0;
+    }
+    case 'matching_type': {
+      const [pairs] = await conn.query(
+        `SELECT left_item, right_item FROM question_matching_pairs WHERE question_id = ?`,
+        [question_id]
+      );
+      const correctMap = {};
+      pairs.forEach(p => {
+        correctMap[p.left_item.toLowerCase().trim()] = p.right_item.toLowerCase().trim();
+      });
+
+      const givenPairs = parseMatchingPairs(normalizedAnswer);
+      let allMatch = givenPairs.length === pairs.length;
+      for (const [left, right] of givenPairs) {
+        if (correctMap[left] !== right) {
+          allMatch = false;
+          break;
+        }
+      }
+      return allMatch ? 1 : 0;
+    }
+    default:
+      return 0;
+  }
+};
+
+const saveActivityAnswers = async (conn, student_id, activity_id, answers) => {
+  const [questionRows] = await conn.query(
+    `SELECT q.question_id
+     FROM questions q
+     JOIN checkpoints c ON c.checkpoint_id = q.checkpoint_id
+     WHERE c.activity_id = ?`,
+    [activity_id]
+  );
+
+  if (questionRows.length === 0) {
+    return { answers_saved: 0, results: [] };
+  }
+
+  const activityQuestionIds = questionRows.map(q => q.question_id);
+  const allowedQuestionIds = new Set(activityQuestionIds.map(id => Number(id)));
+
+  await conn.query(
+    `DELETE FROM student_answers WHERE student_id = ? AND question_id IN (?)`,
+    [student_id, activityQuestionIds]
+  );
+
+  let answersSaved = 0;
+  const seenQuestionIds = new Set();
+  const results = [];
+
+  for (const ans of answers) {
+    const question_id = Number(ans.question_id);
+    const rawAnswer = ans.given_answer ?? ans.answer ?? ans.selected_answer ?? ans.selected_options ?? ans.value;
+
+    if (!allowedQuestionIds.has(question_id)) {
+      results.push({ question_id: ans.question_id, saved: false, reason: 'question_not_in_activity' });
+      continue;
+    }
+
+    if (seenQuestionIds.has(question_id)) {
+      results.push({ question_id, saved: false, reason: 'duplicate_question' });
+      continue;
+    }
+    seenQuestionIds.add(question_id);
+
+    const given_answer = normalizeGivenAnswer(rawAnswer);
+    const is_correct = await scoreQuestionAnswer(conn, question_id, given_answer);
+    if (is_correct == null) {
+      results.push({ question_id, saved: false, reason: 'question_not_found' });
+      continue;
+    }
+
+    await conn.query(
+      `INSERT INTO student_answers (student_id, question_id, given_answer, is_correct)
+       VALUES (?, ?, ?, ?)`,
+      [student_id, question_id, given_answer, is_correct]
+    );
+
+    answersSaved++;
+    results.push({ question_id, saved: true, given_answer, is_correct });
+  }
+
+  return { answers_saved: answersSaved, results };
+};
+
 const createCheckpoint = async (req, res) => {
   try {
     const { activity_id } = req.params;
@@ -635,6 +808,11 @@ const endActivity = async (req, res) => {
     const { activity_id } = req.params;
     const student_id = req.user.role_id;
 
+    const submittedAnswers = normalizeSubmittedAnswers(req.body || {});
+    const answerSave = submittedAnswers.length > 0
+      ? await saveActivityAnswers(conn, student_id, activity_id, submittedAnswers)
+      : { answers_saved: 0, results: [] };
+
     const { checkpoints, summary } = await buildActivityProgressSummary(conn, student_id, activity_id);
 
     if (checkpoints.length === 0) {
@@ -657,6 +835,8 @@ const endActivity = async (req, res) => {
       completed_saved: saveResult.completed_saved,
       points_saved:    saveResult.points_saved,
       points_added_to_log: saveResult.points_earned,
+      answers_saved:   answerSave.answers_saved,
+      answer_results:  answerSave.results,
       summary,
       checkpoints,
     });

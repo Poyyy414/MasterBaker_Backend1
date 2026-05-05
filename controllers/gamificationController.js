@@ -335,6 +335,7 @@ const getLeaderboard = async (req, res) => {
   try {
     const [rows] = await db.query(`
       SELECT
+        ranked.student_id,
         ranked.user_id,
         ranked.firstname,
         ranked.lastname,
@@ -346,6 +347,7 @@ const getLeaderboard = async (req, res) => {
         ) AS rank_position
       FROM (
         SELECT
+          s.student_id,
           u.user_id,
           u.firstname,
           u.lastname,
