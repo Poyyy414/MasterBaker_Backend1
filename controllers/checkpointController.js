@@ -1,4 +1,108 @@
 const db = require('../config/db');
+const { POINTS } = require('./pointsConfig');
+
+const CHECKPOINT_POINTS_PER_CORRECT = POINTS.CHECKPOINT_CORRECT_EASY;
+
+const buildActivityProgressSummary = async (conn, student_id, activity_id) => {
+  const [checkpoints] = await conn.query(
+    `SELECT c.checkpoint_id, c.title, c.order_index,
+            c.video_id, c.trigger_at_seconds AS trigger_timestamp
+     FROM checkpoints c
+     WHERE c.activity_id = ?
+     ORDER BY c.order_index`,
+    [activity_id]
+  );
+
+  for (const cp of checkpoints) {
+    const [questions] = await conn.query(
+      `SELECT q.question_id, q.question_text, q.question_type,
+              sa.given_answer, sa.is_correct
+       FROM questions q
+       LEFT JOIN student_answers sa
+         ON sa.question_id = q.question_id AND sa.student_id = ?
+       WHERE q.checkpoint_id = ?
+       ORDER BY q.order_index`,
+      [student_id, cp.checkpoint_id]
+    );
+
+    cp.questions       = questions;
+    cp.total_questions = questions.length;
+    cp.correct         = questions.filter(q => q.is_correct === 1).length;
+    cp.wrong           = questions.filter(q => q.is_correct === 0 && q.given_answer !== null).length;
+    cp.unanswered      = questions.filter(q => q.given_answer === null).length;
+    cp.submitted       = cp.unanswered === 0 && cp.total_questions > 0;
+    cp.score           = cp.correct;
+  }
+
+  const totalQuestions  = checkpoints.reduce((s, cp) => s + cp.total_questions, 0);
+  const totalCorrect    = checkpoints.reduce((s, cp) => s + cp.correct, 0);
+  const totalWrong      = checkpoints.reduce((s, cp) => s + cp.wrong, 0);
+  const totalUnanswered = checkpoints.reduce((s, cp) => s + cp.unanswered, 0);
+  const completed       = checkpoints.length > 0 && checkpoints.every(cp => cp.submitted);
+  const pointsEarned    = totalCorrect * CHECKPOINT_POINTS_PER_CORRECT;
+
+  return {
+    checkpoints,
+    summary: {
+      total_questions: totalQuestions,
+      correct: totalCorrect,
+      wrong: totalWrong,
+      unanswered: totalUnanswered,
+      points_per_correct: CHECKPOINT_POINTS_PER_CORRECT,
+      points_earned: pointsEarned,
+      score: `${totalCorrect}/${totalQuestions}`,
+      percentage: totalQuestions > 0 ? Math.round((totalCorrect / totalQuestions) * 100) : 0,
+      completed,
+      passed: totalQuestions > 0 && Math.round((totalCorrect / totalQuestions) * 100) >= 60,
+    },
+  };
+};
+
+const persistActivityProgress = async (conn, student_id, activity_id, summary, finalize = false) => {
+  const [existingRows] = await conn.query(
+    `SELECT progress_id, is_completed
+     FROM student_progress
+     WHERE student_id = ? AND activity_id = ?
+     FOR UPDATE`,
+    [student_id, activity_id]
+  );
+
+  const wasCompleted = existingRows[0]?.is_completed === 1;
+  const shouldComplete = finalize && summary.completed;
+  const isCompleted = wasCompleted || shouldComplete ? 1 : 0;
+
+  await conn.query(
+    `INSERT INTO student_progress
+       (student_id, activity_id, checkpoint_id, is_completed, score, completed_at)
+     VALUES (?, ?, NULL, ?, ?, IF(? = 1, NOW(), NULL))
+     ON DUPLICATE KEY UPDATE
+       checkpoint_id = NULL,
+       score = VALUES(score),
+       is_completed = VALUES(is_completed),
+       completed_at = CASE
+         WHEN VALUES(is_completed) = 1 THEN COALESCE(completed_at, NOW())
+         ELSE NULL
+       END`,
+    [student_id, activity_id, isCompleted, summary.correct, isCompleted]
+  );
+
+  const shouldAwardPoints = shouldComplete && !wasCompleted && summary.points_earned > 0;
+  if (shouldAwardPoints) {
+    await conn.query(
+      `INSERT INTO points_log (user_id, session_id, points_earned)
+       VALUES (?, 0, ?)`,
+      [student_id, summary.points_earned]
+    );
+  }
+
+  return {
+    saved: true,
+    completed_saved: isCompleted === 1,
+    points_saved: shouldAwardPoints,
+    points_earned: shouldAwardPoints ? summary.points_earned : 0,
+    already_completed: wasCompleted,
+  };
+};
 
 // ════════════════════════════════════════════════════════════════════════════════
 // CREATE CHECKPOINT (linked to a video + timestamp)
@@ -11,7 +115,14 @@ const db = require('../config/db');
 const createCheckpoint = async (req, res) => {
   try {
     const { activity_id } = req.params;
-    const { title, order_index = 0, video_id = null, trigger_timestamp = 0 } = req.body;
+    const {
+      title,
+      order_index = 0,
+      video_id = null,
+      trigger_timestamp,
+      trigger_at_seconds,
+    } = req.body;
+    const triggerAtSeconds = trigger_timestamp ?? trigger_at_seconds ?? 0;
 
     const [activity] = await db.query(
       `SELECT activity_id FROM activities WHERE activity_id = ?`, [activity_id]
@@ -32,9 +143,9 @@ const createCheckpoint = async (req, res) => {
     }
 
     const [result] = await db.query(
-      `INSERT INTO checkpoints (activity_id, title, order_index, video_id, trigger_timestamp)
+      `INSERT INTO checkpoints (activity_id, title, order_index, video_id, trigger_at_seconds)
        VALUES (?, ?, ?, ?, ?)`,
-      [activity_id, title || null, order_index, video_id, trigger_timestamp]
+      [activity_id, title || null, order_index, video_id, triggerAtSeconds]
     );
 
     return res.status(201).json({
@@ -65,7 +176,8 @@ const getCheckpointsByActivity = async (req, res) => {
     }
 
     const [checkpoints] = await db.query(
-      `SELECT c.*, v.video_url, v.label AS video_label, v.duration
+      `SELECT c.*, c.trigger_at_seconds AS trigger_timestamp,
+              v.video_url, v.title AS video_label, v.duration
        FROM checkpoints c
        LEFT JOIN activity_videos v ON c.video_id = v.video_id
        WHERE c.activity_id = ?
@@ -131,7 +243,8 @@ const getCheckpointById = async (req, res) => {
     const { checkpoint_id } = req.params;
 
     const [rows] = await db.query(
-      `SELECT c.*, v.video_url, v.label AS video_label, v.duration
+      `SELECT c.*, c.trigger_at_seconds AS trigger_timestamp,
+              v.video_url, v.title AS video_label, v.duration
        FROM checkpoints c
        LEFT JOIN activity_videos v ON c.video_id = v.video_id
        WHERE c.checkpoint_id = ?`,
@@ -190,7 +303,8 @@ const getCheckpointById = async (req, res) => {
 const updateCheckpoint = async (req, res) => {
   try {
     const { checkpoint_id } = req.params;
-    const { title, order_index, video_id, trigger_timestamp } = req.body;
+    const { title, order_index, video_id, trigger_timestamp, trigger_at_seconds } = req.body;
+    const triggerAtSeconds = trigger_timestamp ?? trigger_at_seconds ?? null;
 
     const [existing] = await db.query(
       `SELECT checkpoint_id FROM checkpoints WHERE checkpoint_id = ?`, [checkpoint_id]
@@ -204,9 +318,9 @@ const updateCheckpoint = async (req, res) => {
         title             = COALESCE(?, title),
         order_index       = COALESCE(?, order_index),
         video_id          = COALESCE(?, video_id),
-        trigger_timestamp = COALESCE(?, trigger_timestamp)
+        trigger_at_seconds = COALESCE(?, trigger_at_seconds)
        WHERE checkpoint_id = ?`,
-      [title || null, order_index ?? null, video_id ?? null, trigger_timestamp ?? null, checkpoint_id]
+      [title || null, order_index ?? null, video_id ?? null, triggerAtSeconds, checkpoint_id]
     );
 
     return res.status(200).json({ message: 'Checkpoint updated successfully.' });
@@ -274,10 +388,11 @@ const getActivityLearnView = async (req, res) => {
     // For each video, attach its checkpoints (ordered by trigger_timestamp)
     for (const video of videos) {
       const [checkpoints] = await db.query(
-        `SELECT checkpoint_id, title, order_index, trigger_timestamp
+        `SELECT checkpoint_id, title, order_index,
+                trigger_at_seconds AS trigger_timestamp
          FROM checkpoints
          WHERE video_id = ? AND activity_id = ?
-         ORDER BY trigger_timestamp`,
+         ORDER BY trigger_at_seconds`,
         [video.video_id, id]
       );
 
@@ -365,11 +480,6 @@ const submitCheckpoint = async (req, res) => {
         [student_id, ids]
       );
     }
-    await conn.query(
-      `DELETE FROM student_progress WHERE student_id = ? AND checkpoint_id = ?`,
-      [student_id, checkpoint_id]
-    );
-
     let totalScore = 0;
     const results = [];
 
@@ -449,23 +559,30 @@ const submitCheckpoint = async (req, res) => {
       results.push({ question_id, is_correct });
     }
 
-    await conn.query(
-      `INSERT INTO student_progress (student_id, activity_id, checkpoint_id, score)
-       VALUES (?, ?, ?, ?)`,
-      [student_id, activity_id, checkpoint_id, totalScore]
-    );
-
     // Get the checkpoint's video_id + trigger_timestamp so frontend knows to resume
     const [cp] = await conn.query(
-      `SELECT video_id, trigger_timestamp FROM checkpoints WHERE checkpoint_id = ?`,
+      `SELECT video_id, trigger_at_seconds AS trigger_timestamp
+       FROM checkpoints WHERE checkpoint_id = ?`,
       [checkpoint_id]
     );
+
+    const correct = totalScore;
+    const wrong = Math.max(answers.length - correct, 0);
+    const pointsEarned = correct * CHECKPOINT_POINTS_PER_CORRECT;
+    const { summary } = await buildActivityProgressSummary(conn, student_id, activity_id);
+    const progressSave = await persistActivityProgress(conn, student_id, activity_id, summary, false);
 
     await conn.commit();
     return res.status(200).json({
       message:           'Checkpoint submitted. Video can now resume.',
       score:             totalScore,
       total:             answers.length,
+      correct,
+      wrong,
+      points_per_correct: CHECKPOINT_POINTS_PER_CORRECT,
+      points_earned:      pointsEarned,
+      activity_summary:   summary,
+      progress_saved:     progressSave.saved,
       results,
       resume_video_id:          cp[0]?.video_id || null,
       resume_from_timestamp:    cp[0]?.trigger_timestamp || 0,
@@ -488,54 +605,13 @@ const getActivityProgress = async (req, res) => {
     const { activity_id } = req.params;
     const student_id = req.user.role_id;
 
-    const [checkpoints] = await db.query(
-      `SELECT c.checkpoint_id, c.title, c.order_index,
-              c.video_id, c.trigger_timestamp, sp.score
-       FROM checkpoints c
-       LEFT JOIN student_progress sp
-         ON sp.checkpoint_id = c.checkpoint_id AND sp.student_id = ?
-       WHERE c.activity_id = ?
-       ORDER BY c.order_index`,
-      [student_id, activity_id]
-    );
-
-    for (const cp of checkpoints) {
-      const [questions] = await db.query(
-        `SELECT q.question_id, q.question_text, q.question_type,
-                sa.given_answer, sa.is_correct
-         FROM questions q
-         LEFT JOIN student_answers sa
-           ON sa.question_id = q.question_id AND sa.student_id = ?
-         WHERE q.checkpoint_id = ?
-         ORDER BY q.order_index`,
-        [student_id, cp.checkpoint_id]
-      );
-
-      cp.questions       = questions;
-      cp.total_questions = questions.length;
-      cp.correct         = questions.filter(q => q.is_correct === 1).length;
-      cp.wrong           = questions.filter(q => q.is_correct === 0 && q.given_answer !== null).length;
-      cp.unanswered      = questions.filter(q => q.given_answer === null).length;
-      cp.submitted       = cp.unanswered === 0 && cp.total_questions > 0;
-    }
-
-    const totalQuestions = checkpoints.reduce((s, cp) => s + cp.total_questions, 0);
-    const totalCorrect   = checkpoints.reduce((s, cp) => s + cp.correct, 0);
-    const totalWrong     = checkpoints.reduce((s, cp) => s + cp.wrong, 0);
-    const completed      = checkpoints.every(cp => cp.submitted);
+    const { checkpoints, summary } = await buildActivityProgressSummary(db, student_id, activity_id);
 
     return res.status(200).json({
       activity_id:  parseInt(activity_id),
       student_id,
       can_retake:   true,
-      summary: {
-        total_questions: totalQuestions,
-        correct:         totalCorrect,
-        wrong:           totalWrong,
-        score:           `${totalCorrect}/${totalQuestions}`,
-        percentage:      totalQuestions > 0 ? Math.round((totalCorrect / totalQuestions) * 100) : 0,
-        completed,
-      },
+      summary,
       checkpoints,
     });
   } catch (error) {
@@ -556,83 +632,29 @@ const endActivity = async (req, res) => {
     const { activity_id } = req.params;
     const student_id = req.user.role_id;
 
-    const [checkpoints] = await conn.query(
-      `SELECT c.checkpoint_id, c.title, c.order_index,
-              c.video_id, c.trigger_timestamp, sp.score
-       FROM checkpoints c
-       LEFT JOIN student_progress sp
-         ON sp.checkpoint_id = c.checkpoint_id AND sp.student_id = ?
-       WHERE c.activity_id = ?
-       ORDER BY c.order_index`,
-      [student_id, activity_id]
-    );
+    const { checkpoints, summary } = await buildActivityProgressSummary(conn, student_id, activity_id);
 
     if (checkpoints.length === 0) {
+      await conn.rollback();
       return res.status(404).json({ message: 'No checkpoints found for this activity.' });
     }
 
-    for (const cp of checkpoints) {
-      const [questions] = await conn.query(
-        `SELECT q.question_id, q.question_text, q.question_type,
-                sa.given_answer, sa.is_correct
-         FROM questions q
-         LEFT JOIN student_answers sa
-           ON sa.question_id = q.question_id AND sa.student_id = ?
-         WHERE q.checkpoint_id = ?
-         ORDER BY q.order_index`,
-        [student_id, cp.checkpoint_id]
-      );
-
-      cp.questions       = questions;
-      cp.total_questions = questions.length;
-      cp.correct         = questions.filter(q => q.is_correct === 1).length;
-      cp.wrong           = questions.filter(q => q.is_correct === 0 && q.given_answer !== null).length;
-      cp.unanswered      = questions.filter(q => q.given_answer === null).length;
-    }
-
-    const totalQuestions  = checkpoints.reduce((s, cp) => s + cp.total_questions, 0);
-    const totalCorrect    = checkpoints.reduce((s, cp) => s + cp.correct, 0);
-    const totalWrong      = checkpoints.reduce((s, cp) => s + cp.wrong, 0);
-    const totalUnanswered = checkpoints.reduce((s, cp) => s + cp.unanswered, 0);
-    const percentage      = totalQuestions > 0 ? Math.round((totalCorrect / totalQuestions) * 100) : 0;
-
-    // ── Clear progress so student can retake ──────────────────────────────────
-    const checkpointIds = checkpoints.map(c => c.checkpoint_id);
-    if (checkpointIds.length > 0) {
-      const [allQuestions] = await conn.query(
-        `SELECT question_id FROM questions WHERE checkpoint_id IN (?)`,
-        [checkpointIds]
-      );
-      const questionIds = allQuestions.map(q => q.question_id);
-
-      if (questionIds.length > 0) {
-        await conn.query(
-          `DELETE FROM student_answers WHERE student_id = ? AND question_id IN (?)`,
-          [student_id, questionIds]
-        );
-      }
-      await conn.query(
-        `DELETE FROM student_progress WHERE student_id = ? AND checkpoint_id IN (?)`,
-        [student_id, checkpointIds]
-      );
-    }
+    const saveResult = await persistActivityProgress(conn, student_id, activity_id, summary, true);
 
     await conn.commit();
 
     return res.status(200).json({
-      message:     'Activity completed! You can retake it anytime.',
+      message:     summary.completed
+        ? 'Activity progress saved.'
+        : 'Activity progress saved, but not all questions are answered yet.',
       activity_id: parseInt(activity_id),
       student_id,
       can_retake:  true,
-      summary: {
-        total_questions: totalQuestions,
-        correct:         totalCorrect,
-        wrong:           totalWrong,
-        unanswered:      totalUnanswered,
-        score:           `${totalCorrect}/${totalQuestions}`,
-        percentage,
-        passed:          percentage >= 60,
-      },
+      saved:       saveResult.saved,
+      completed_saved: saveResult.completed_saved,
+      points_saved:    saveResult.points_saved,
+      points_added_to_log: saveResult.points_earned,
+      summary,
       checkpoints,
     });
   } catch (error) {
@@ -655,7 +677,7 @@ const getNextQuestion = async (req, res) => {
 
     const [checkpoints] = await db.query(
       `SELECT c.checkpoint_id, c.title, c.order_index,
-              c.video_id, c.trigger_timestamp
+              c.video_id, c.trigger_at_seconds AS trigger_timestamp
        FROM checkpoints c
        WHERE c.activity_id = ?
        ORDER BY c.order_index`,
@@ -667,13 +689,18 @@ const getNextQuestion = async (req, res) => {
     }
 
     for (const cp of checkpoints) {
-      const [progress] = await db.query(
-        `SELECT score FROM student_progress
-         WHERE student_id = ? AND checkpoint_id = ?`,
+      const [[answerState]] = await db.query(
+        `SELECT
+           COUNT(q.question_id) AS total_questions,
+           SUM(CASE WHEN sa.given_answer IS NOT NULL THEN 1 ELSE 0 END) AS answered_questions
+         FROM questions q
+         LEFT JOIN student_answers sa
+           ON sa.question_id = q.question_id AND sa.student_id = ?
+         WHERE q.checkpoint_id = ?`,
         [student_id, cp.checkpoint_id]
       );
 
-      if (progress.length === 0) {
+      if ((answerState.answered_questions || 0) < (answerState.total_questions || 0)) {
         const [questions] = await db.query(
           `SELECT * FROM questions WHERE checkpoint_id = ? ORDER BY order_index`,
           [cp.checkpoint_id]

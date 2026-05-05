@@ -79,6 +79,7 @@ router.get ('/activities/:id/learn',                  auth, getActivityLearnView
 router.get ('/activities/:id/videos',                 auth, getVideosByActivity);
 router.get ('/activities/:id/checkpoints',            auth, getCheckpointsByActivity);
 router.get ('/activities/:activity_id/progress',      auth, getActivityProgress);
+router.post('/activities/:activity_id/progress',      auth, endActivity);
 router.get ('/activities/:activity_id/next-question', auth, getNextQuestion);
 router.get ('/activities/:id',                        auth, getActivityById);
 router.post('/activities/:activity_id/end',           auth, endActivity);

@@ -298,7 +298,10 @@ const getActivityLearnView = async (req, res) => {
     );
 
     const [checkpoints] = await db.query(
-      `SELECT * FROM checkpoints WHERE activity_id = ? ORDER BY order_index`,
+      `SELECT *, trigger_at_seconds AS trigger_timestamp
+       FROM checkpoints
+       WHERE activity_id = ?
+       ORDER BY order_index`,
       [id]
     );
 
@@ -367,7 +370,10 @@ const getCheckpointsByActivity = async (req, res) => {
     }
 
     const [checkpoints] = await db.query(
-      `SELECT * FROM checkpoints WHERE activity_id = ? ORDER BY order_index`,
+      `SELECT *, trigger_at_seconds AS trigger_timestamp
+       FROM checkpoints
+       WHERE activity_id = ?
+       ORDER BY order_index`,
       [id]
     );
 
