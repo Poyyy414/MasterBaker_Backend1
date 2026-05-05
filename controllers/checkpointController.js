@@ -67,9 +67,12 @@ const persistActivityProgress = async (conn, student_id, activity_id, summary, f
     [student_id, activity_id]
   );
 
-  const wasCompleted = existingRows[0]?.is_completed === 1;
+  const existingProgress = existingRows[0] || null;
+  const wasActivityCompleted = existingProgress?.is_completed === 1
+    && existingProgress?.score != null
+    && existingProgress?.completed_at != null;
   const shouldComplete = finalize && summary.completed;
-  const isCompleted = wasCompleted || shouldComplete ? 1 : 0;
+  const isCompleted = wasActivityCompleted || shouldComplete ? 1 : 0;
 
   await conn.query(
     `INSERT INTO student_progress
@@ -86,7 +89,7 @@ const persistActivityProgress = async (conn, student_id, activity_id, summary, f
     [student_id, activity_id, isCompleted, summary.correct, isCompleted]
   );
 
-  const shouldAwardPoints = shouldComplete && !wasCompleted && summary.points_earned > 0;
+  const shouldAwardPoints = shouldComplete && !wasActivityCompleted && summary.points_earned > 0;
   if (shouldAwardPoints) {
     await conn.query(
       `INSERT INTO points_log (user_id, session_id, points_earned)
@@ -100,7 +103,7 @@ const persistActivityProgress = async (conn, student_id, activity_id, summary, f
     completed_saved: isCompleted === 1,
     points_saved: shouldAwardPoints,
     points_earned: shouldAwardPoints ? summary.points_earned : 0,
-    already_completed: wasCompleted,
+    already_completed: wasActivityCompleted,
   };
 };
 
