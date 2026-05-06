@@ -1,3 +1,4 @@
+const db             = require('../config/db');
 const { cloudinary } = require('../config/cloudinary');
 const multer         = require('multer');
 const { Readable }   = require('stream');
@@ -243,6 +244,52 @@ const deleteImage = async (req, res) => {
   }
 };
 
+const uploadAvatar = [
+  upload.single('avatar'),
+  async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ message: 'No avatar file provided. Use field name "avatar".' });
+      }
+      const user_id = req.user.user_id;
+      const publicId = `user_${user_id}`;
+      const result = await streamToCloudinary(req.file.buffer, 'masterbaker/avatars');
+
+      await db.query(
+        `UPDATE users SET avatar_url = ? WHERE user_id = ?`,
+        [result.secure_url, user_id]
+      );
+
+      return res.status(200).json({
+        message:    'Avatar uploaded successfully.',
+        avatar_url: result.secure_url,
+        public_id:  publicId,
+      });
+    } catch (error) {
+      console.error('Upload avatar error:', error);
+      return res.status(500).json({ message: 'Avatar upload failed.', error: error.message });
+    }
+  },
+];
+
+const deleteAvatar = async (req, res) => {
+  try {
+    const user_id = req.user.user_id;
+    const publicId = `masterbaker/avatars/user_${user_id}`;
+
+    await cloudinary.uploader.destroy(publicId);
+    await db.query(
+      `UPDATE users SET avatar_url = NULL WHERE user_id = ?`,
+      [user_id]
+    );
+
+    return res.status(200).json({ message: 'Avatar removed.' });
+  } catch (error) {
+    console.error('Delete avatar error:', error);
+    return res.status(500).json({ message: 'Avatar delete failed.', error: error.message });
+  }
+};
+
 module.exports = {
   uploadImage,
   uploadGameItemImage,
@@ -251,5 +298,7 @@ module.exports = {
   uploadThumbnail,
   uploadBulk,
   deleteImage,
+  uploadAvatar,
+  deleteAvatar,
   upload,
 };

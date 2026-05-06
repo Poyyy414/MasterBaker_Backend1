@@ -6,7 +6,7 @@ const { verifyToken } = require('../middleware/authMiddleware');
 const {
   uploadAvatar,
   deleteAvatar,
-} = require('../controllers/userProfileController');
+} = require('../controllers/uploadController');
 
 // ── Multer — memory storage (buffer goes straight to Cloudinary) ──────────────
 const upload = multer({
