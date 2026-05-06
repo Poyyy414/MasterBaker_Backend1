@@ -6,12 +6,6 @@ const POINTS_MAP = {
   SPOT_DIFFERENCE: { per_correct: 100, time_bonus: 50 },
 };
 
-const PLAY_MAP = {
-  PICK_INGREDIENT: (id) => `/api/student/games/${id}/pick-ingredient`,
-  TAG_SEQUENCE:    (id) => `/api/student/games/${id}/sequence`,
-  SPOT_DIFFERENCE: (id) => `/api/student/games/${id}/difference`,
-};
-
 const SUBMIT_MAP = {
   PICK_INGREDIENT: (id) => `/api/student/games/${id}/pick-ingredient/submit`,
   TAG_SEQUENCE:    (id) => `/api/student/games/${id}/sequence/submit`,
@@ -20,8 +14,6 @@ const SUBMIT_MAP = {
 
 // ════════════════════════════════════════════════════════════════════════════════
 // GET ALL PATHS
-// GET /api/student/paths
-// GET /api/teacher/paths
 // ════════════════════════════════════════════════════════════════════════════════
 const getPaths = async (req, res) => {
   try {
@@ -37,7 +29,6 @@ const getPaths = async (req, res) => {
 
 // ════════════════════════════════════════════════════════════════════════════════
 // GET ALL GAME TYPES
-// GET /api/teacher/game-types
 // ════════════════════════════════════════════════════════════════════════════════
 const getGameTypes = async (req, res) => {
   try {
@@ -103,14 +94,13 @@ const createGame = async (req, res) => {
 
 // ════════════════════════════════════════════════════════════════════════════════
 // GET ALL GAMES (teacher)
-// GET /api/teacher/games
 // ════════════════════════════════════════════════════════════════════════════════
 const getAllGames = async (req, res) => {
   try {
     const [rows] = await db.query(`
       SELECT
         g.game_id, g.title, g.description, g.time_limit,
-        g.display_order, g.order_index, g.thumbnail_url,
+        g.display_order, g.thumbnail_url,
         g.difficulty, g.level, g.parent_game_id, g.created_at,
         gt.game_type_id, gt.name AS game_type_name, gt.code AS game_type_code,
         p.path_id, p.name AS path_name
@@ -128,8 +118,6 @@ const getAllGames = async (req, res) => {
 
 // ════════════════════════════════════════════════════════════════════════════════
 // GET GAME BY ID
-// GET /api/teacher/games/:game_id
-// GET /api/student/games/:game_id
 // ════════════════════════════════════════════════════════════════════════════════
 const getGameById = async (req, res) => {
   try {
@@ -153,8 +141,7 @@ const getGameById = async (req, res) => {
 };
 
 // ════════════════════════════════════════════════════════════════════════════════
-// GET GAMES BY PATH (teacher) — returns all games including children
-// GET /api/teacher/games/path/:path_id
+// GET GAMES BY PATH (teacher)
 // ════════════════════════════════════════════════════════════════════════════════
 const getGamesByPath = async (req, res) => {
   try {
@@ -181,8 +168,7 @@ const getGamesByPath = async (req, res) => {
 };
 
 // ════════════════════════════════════════════════════════════════════════════════
-// GET GAMES BY PATH (student) — returns PARENT games only (the 3 game type cards)
-// GET /api/student/games/path/:path_id
+// GET GAMES BY PATH (student) — PARENT games only
 // ════════════════════════════════════════════════════════════════════════════════
 const getGamesByPathStudent = async (req, res) => {
   try {
@@ -192,7 +178,6 @@ const getGamesByPathStudent = async (req, res) => {
     const [path] = await db.query(`SELECT path_id, name FROM paths WHERE path_id = ?`, [path_id]);
     if (path.length === 0) return res.status(404).json({ message: 'Path not found.' });
 
-    // ── ONLY parent games (parent_game_id IS NULL) ─────────────────────────────
     const [rows] = await db.query(`
       SELECT g.game_id, g.title, g.description, g.time_limit,
              g.thumbnail_url, g.display_order,
@@ -204,21 +189,17 @@ const getGamesByPathStudent = async (req, res) => {
       ORDER BY g.display_order ASC
     `, [path_id]);
 
-    // ── Get student best session per parent game ────────────────────────────────
-    // For parent game completion: check if ANY child level has been passed
     const enriched = [];
     let previousPassed = true;
 
     for (let i = 0; i < rows.length; i++) {
       const g = rows[i];
 
-      // Get child game IDs
       const [children] = await db.query(
         `SELECT game_id FROM games WHERE parent_game_id = ?`, [g.game_id]
       );
       const childIds = children.map(c => c.game_id);
 
-      // Check if student has passed any child level (>= 60%)
       let is_completed = false;
       let best_score = 0, best_total = 0, best_percentage = 0;
 
@@ -228,12 +209,12 @@ const getGamesByPathStudent = async (req, res) => {
                   MAX(gs.score) AS best_score,
                   MAX(gs.total_items) AS best_total
            FROM game_sessions gs
-           WHERE gs.user_id = ? AND gs.recipe_id IN (?)`,
+           WHERE gs.user_id = ? AND gs.game_id IN (?)`,
           [user_id, childIds]
         );
-        best_percentage = sessions[0]?.best_pct   ?? 0;
-        best_score      = sessions[0]?.best_score  ?? 0;
-        best_total      = sessions[0]?.best_total  ?? 0;
+        best_percentage = sessions[0]?.best_pct  ?? 0;
+        best_score      = sessions[0]?.best_score ?? 0;
+        best_total      = sessions[0]?.best_total ?? 0;
         is_completed    = best_percentage >= 60;
       }
 
@@ -254,7 +235,7 @@ const getGamesByPathStudent = async (req, res) => {
         best_score,
         best_total,
         best_percentage,
-        levels_url:         `/api/student/games/${g.game_id}/levels`,
+        levels_url: `/api/student/games/${g.game_id}/levels`,
       });
 
       previousPassed = is_completed;
@@ -276,9 +257,7 @@ const getGamesByPathStudent = async (req, res) => {
 };
 
 // ════════════════════════════════════════════════════════════════════════════════
-// GET LEVELS BY GAME — student clicks a game card → Easy/Medium/Hard
-// GET /api/student/games/:game_id/levels
-// GET /api/teacher/games/:game_id/levels
+// GET LEVELS BY GAME
 // ════════════════════════════════════════════════════════════════════════════════
 const getGameLevels = async (req, res) => {
   try {
@@ -295,7 +274,6 @@ const getGameLevels = async (req, res) => {
     `, [game_id]);
     if (parent.length === 0) return res.status(404).json({ message: 'Game not found.' });
 
-    // ── Only child levels ──────────────────────────────────────────────────────
     const [levels] = await db.query(
       `SELECT game_id, title, description, thumbnail_url,
               time_limit, display_order, difficulty, level
@@ -317,18 +295,17 @@ const getGameLevels = async (req, res) => {
       });
     }
 
-    // ── Student sessions per level ─────────────────────────────────────────────
     let sessionMap = {};
     if (user_id) {
       const levelIds = levels.map(l => l.game_id);
       const [sessions] = await db.query(
-        `SELECT gs.recipe_id AS game_id,
+        `SELECT gs.game_id,
                 MAX(gs.score) AS best_score,
                 MAX(gs.total_items) AS best_total,
                 MAX(ROUND(gs.score / gs.total_items * 100)) AS best_percentage
          FROM game_sessions gs
-         WHERE gs.user_id = ? AND gs.recipe_id IN (?)
-         GROUP BY gs.recipe_id`,
+         WHERE gs.user_id = ? AND gs.game_id IN (?)
+         GROUP BY gs.game_id`,
         [user_id, levelIds]
       );
       for (const s of sessions) sessionMap[s.game_id] = s;
@@ -340,7 +317,6 @@ const getGameLevels = async (req, res) => {
       const session         = sessionMap[g.game_id] || null;
       const best_percentage = session?.best_percentage ?? 0;
       const is_completed    = best_percentage >= 60;
-      // level 1 always unlocked, next unlocks only after prev is completed
       const prev_completed  = i === 0
         ? true
         : (sessionMap[levels[i - 1].game_id]?.best_percentage ?? 0) >= 60;
@@ -355,11 +331,11 @@ const getGameLevels = async (req, res) => {
         level:          g.level,
         is_locked:      !prev_completed,
         is_completed,
-        best_score:     session?.best_score  ?? 0,
-        best_total:     session?.best_total  ?? 0,
+        best_score:     session?.best_score ?? 0,
+        best_total:     session?.best_total ?? 0,
         best_percentage,
-        play_url:       `/api/student/games/${g.game_id}/play`,
-        submit_url:     SUBMIT_MAP[code]?.(g.game_id) || null,
+        play_url:   `/api/student/games/${g.game_id}/play`,
+        submit_url: SUBMIT_MAP[code]?.(g.game_id) || null,
       };
     });
 
@@ -378,8 +354,7 @@ const getGameLevels = async (req, res) => {
 };
 
 // ════════════════════════════════════════════════════════════════════════════════
-// PLAY GAME — auto-detects type, checks lock, returns content
-// GET /api/student/games/:game_id/play
+// PLAY GAME
 // ════════════════════════════════════════════════════════════════════════════════
 const playGame = async (req, res) => {
   try {
@@ -397,7 +372,7 @@ const playGame = async (req, res) => {
     if (gameRows.length === 0) return res.status(404).json({ message: 'Game not found.' });
     const game = gameRows[0];
 
-    // ── If parent game → find first unlocked child and play it ────────────────
+    // ── If parent game → find first unlocked child ────────────────────────────
     if (!game.parent_game_id) {
       const [children] = await db.query(
         `SELECT game_id FROM games
@@ -416,7 +391,7 @@ const playGame = async (req, res) => {
         const prevId = children[i - 1].game_id;
         const [prev] = await db.query(
           `SELECT MAX(ROUND(score / total_items * 100)) AS best_pct
-           FROM game_sessions WHERE user_id = ? AND recipe_id = ?`,
+           FROM game_sessions WHERE user_id = ? AND game_id = ?`,
           [user_id, prevId]
         );
         if ((prev[0]?.best_pct ?? 0) >= 60) {
@@ -430,7 +405,7 @@ const playGame = async (req, res) => {
       return playGame(req, res);
     }
 
-    // ── Lock check — only for child games ─────────────────────────────────────
+    // ── Lock check ────────────────────────────────────────────────────────────
     const [siblings] = await db.query(
       `SELECT game_id FROM games
        WHERE parent_game_id = ?
@@ -443,7 +418,7 @@ const playGame = async (req, res) => {
       const prevGameId = siblings[myIndex - 1].game_id;
       const [prevSession] = await db.query(
         `SELECT MAX(ROUND(score / total_items * 100)) AS best_pct
-         FROM game_sessions WHERE user_id = ? AND recipe_id = ?`,
+         FROM game_sessions WHERE user_id = ? AND game_id = ?`,
         [user_id, prevGameId]
       );
       const prevPct = prevSession[0]?.best_pct ?? 0;
@@ -462,27 +437,21 @@ const playGame = async (req, res) => {
 
     switch (game.game_type_code) {
       case 'PICK_INGREDIENT': {
-  const [items] = await db.query(
-    `SELECT item_id, name, image_url, is_correct
-     FROM game_items WHERE recipe_id = ? ORDER BY RAND()`,  // recipe_id, not game_id
-    [game_id]
-  );
-  content = {
-    question: 'Pick the correct ingredients.',
-    items,
-  };
-  break;
-}
+        const [items] = await db.query(
+          `SELECT item_id, name, image_url, is_correct
+           FROM game_items WHERE recipe_id = ? ORDER BY RAND()`,
+          [game_id]
+        );
+        content = { question: 'Pick the correct ingredients.', items };
+        break;
+      }
       case 'TAG_SEQUENCE': {
         const [steps] = await db.query(
           `SELECT step_id, description AS step_text, image_url AS step_image
            FROM game_sequence_steps WHERE recipe_id = ? ORDER BY RAND()`,
           [game_id]
         );
-        content = {
-          question: 'Arrange the steps in the correct order.',
-          steps,
-        };
+        content = { question: 'Arrange the steps in the correct order.', steps };
         break;
       }
       case 'SPOT_DIFFERENCE': {
@@ -510,7 +479,7 @@ const playGame = async (req, res) => {
               MAX(ROUND(score / total_items * 100)) AS best_percentage,
               COUNT(*) AS attempts
        FROM game_sessions
-       WHERE user_id = ? AND recipe_id = ?`,
+       WHERE user_id = ? AND game_id = ?`,
       [user_id, game_id]
     );
 
@@ -544,7 +513,6 @@ const playGame = async (req, res) => {
 
 // ════════════════════════════════════════════════════════════════════════════════
 // UPDATE GAME
-// PUT /api/teacher/games/:game_id
 // ════════════════════════════════════════════════════════════════════════════════
 const updateGame = async (req, res) => {
   try {
@@ -579,7 +547,6 @@ const updateGame = async (req, res) => {
 
 // ════════════════════════════════════════════════════════════════════════════════
 // DELETE GAME
-// DELETE /api/teacher/games/:game_id
 // ════════════════════════════════════════════════════════════════════════════════
 const deleteGame = async (req, res) => {
   try {
