@@ -379,19 +379,22 @@ const getLeaderboard = async (req, res) => {
           u.lastname,
           u.role,
           u.avatar_url,
-          COALESCE(SUM(gs.points_earned), 0) AS total_points,
-          COUNT(gs.session_id) AS games_played,
+          COALESCE(SUM(pl.points_earned), 0)   AS total_points,
+          COUNT(DISTINCT gs.session_id)         AS games_played,
           COALESCE(lessons.lessons_completed, 0) AS lessons_completed
         FROM users u
+        LEFT JOIN points_log pl ON pl.user_id = u.user_id
         LEFT JOIN game_sessions gs ON gs.user_id = u.user_id
         LEFT JOIN (
-          SELECT student_id AS user_id, COUNT(DISTINCT activity_id) AS lessons_completed
+          SELECT student_id AS user_id,
+                 COUNT(DISTINCT activity_id) AS lessons_completed
           FROM student_progress
           WHERE is_completed = 1
           GROUP BY student_id
         ) lessons ON lessons.user_id = u.user_id
         WHERE u.role = 'student'
-        GROUP BY u.user_id, u.firstname, u.lastname, u.role, u.avatar_url, lessons.lessons_completed
+        GROUP BY u.user_id, u.firstname, u.lastname,
+                 u.role, u.avatar_url, lessons.lessons_completed
       ) ranked
       ORDER BY ranked.total_points DESC, ranked.user_id ASC
     `);
