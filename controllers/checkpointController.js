@@ -93,7 +93,7 @@ const persistActivityProgress = async (conn, student_id, activity_id, summary, f
   if (shouldAwardPoints) {
     await conn.query(
       `INSERT INTO points_log (user_id, session_id, points_earned)
-       VALUES (?, 0, ?)`,
+       VALUES (?, NULL, ?)`,
       [student_id, summary.points_earned]
     );
   }

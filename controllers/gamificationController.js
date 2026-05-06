@@ -1,6 +1,27 @@
 const db = require('../config/db');
 const { POINTS, applyTryAgain } = require('./pointsConfig');
 
+const ensureUserGameProgressTable = async () => {
+  const conn = await db.getConnection();
+  try {
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS user_game_progress (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT NOT NULL UNIQUE,
+        game_progress JSON NOT NULL,
+        games_list JSON NULL,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    `);
+  } finally {
+    conn.release();
+  }
+};
+
+ensureUserGameProgressTable().catch((err) => {
+  console.error('Failed to ensure user_game_progress table exists:', err);
+});
+
 // ════════════════════════════════════════════════════════════════════════════════
 // INTERNAL HELPERS — exported for use by game controllers
 // ════════════════════════════════════════════════════════════════════════════════
@@ -111,9 +132,15 @@ const createGameSession = async (req, res) => {
 
     // ── Map level string → difficulty ─────────────────────────────────────────
     const LEVEL_MAP = {
-      strawberry: 'Easy',
-      chocolate:  'Medium',
-      blueberry:  'Hard',
+      strawberry:      'Easy',
+      cake_vanilla:    'Easy',
+      pie_pumpkin:     'Easy',
+      chocolate:       'Medium',
+      cake_chocolate:  'Medium',
+      pie_apple:       'Medium',
+      blueberry:       'Hard',
+      cake_blueberry:  'Hard',
+      pie_buko:        'Hard',
     };
 
     const difficulty = LEVEL_MAP[level];
@@ -164,7 +191,7 @@ const createGameSession = async (req, res) => {
     const [result] = await conn.query(
   `INSERT INTO game_sessions (user_id, game_id, game_type_id, score, total_items, points_earned)
    VALUES (?, ?, ?, ?, ?, ?)`,
-  [user_id, game_id, game_type_id, score, total_items, points_earned]
+  [user_id, game_id, game_type_id, score, total, points_earned]
 );
 const session_id = result.insertId; // ← use this, NOT 0
 
@@ -241,7 +268,7 @@ const completeVideoLesson = async (req, res) => {
     );
 
     await conn.query(
-      `INSERT INTO points_log (user_id, session_id, points_earned) VALUES (?, 0, ?)`,
+      `INSERT INTO points_log (user_id, session_id, points_earned) VALUES (?, NULL, ?)`,
       [user_id, POINTS.VIDEO_LESSON_COMPLETED]
     );
 
@@ -283,7 +310,7 @@ const completeCheckpoint = async (req, res) => {
     const points_earned = correct_count * ptsPerCorrect;
 
     await conn.query(
-      `INSERT INTO points_log (user_id, session_id, points_earned) VALUES (?, 0, ?)`,
+      `INSERT INTO points_log (user_id, session_id, points_earned) VALUES (?, NULL, ?)`,
       [user_id, points_earned]
     );
 
@@ -426,7 +453,7 @@ const getMyPoints = async (req, res) => {
          NULL AS score, NULL AS total_items,
          'lesson' AS source_type
        FROM points_log pl
-       WHERE pl.user_id = ? AND pl.session_id = 0
+       WHERE pl.user_id = ? AND pl.session_id IS NULL
        ORDER BY pl.earned_at DESC`,
       [user_id]
     );
@@ -448,6 +475,12 @@ const getMyPoints = async (req, res) => {
 const getGameProgress = async (req, res) => {
   try {
     const user_id = req.user.user_id;
+
+    const [stored] = await db.query(
+      `SELECT game_progress FROM user_game_progress WHERE user_id = ?`,
+      [user_id]
+    );
+
     const [sessions] = await db.query(
       `SELECT g.path_id, gt.code AS game_type_code, g.difficulty,
         MAX(gs.score / gs.total_items) AS best_ratio
@@ -458,16 +491,17 @@ const getGameProgress = async (req, res) => {
  GROUP BY g.game_id, g.path_id, gt.code, g.difficulty`,
       [user_id]
     );
-    // Build the { gameId: ['level1','level2'] } map the frontend expects
-    const progress = {};
-    for (const s of sessions) {
-      if ((s.best_ratio ?? 0) < 0.6) continue;
-      const key = `${s.game_type_code}_path${s.path_id}`.toLowerCase();
-      if (!progress[key]) progress[key] = [];
-      if (!progress[key].includes(s.difficulty.toLowerCase()))
-        progress[key].push(s.difficulty.toLowerCase());
-    }
-    return res.status(200).json({ game_progress: progress });
+
+    const games_list = sessions.map((s) => ({
+      game_type_code: s.game_type_code,
+      path_id: s.path_id,
+      difficulty: s.difficulty,
+      best_ratio: Number(s.best_ratio ?? 0),
+    }));
+
+    const game_progress = stored.length > 0 ? stored[0].game_progress : {};
+
+    return res.status(200).json({ game_progress, games_list });
   } catch (err) {
     console.error('getGameProgress error:', err);
     return res.status(500).json({ message: 'Server error.' });
@@ -476,9 +510,26 @@ const getGameProgress = async (req, res) => {
 
 // POST /api/student/game-progress  (client pushes its local map)
 const saveGameProgress = async (req, res) => {
-  // Progress is derived from game_sessions on read — nothing to store.
-  // Accept and ack so the frontend doesn't see an error.
-  return res.status(200).json({ message: 'Progress acknowledged.' });
+  try {
+    const user_id = req.user.user_id;
+    const { game_progress } = req.body;
+
+    if (!game_progress || typeof game_progress !== 'object') {
+      return res.status(400).json({ message: 'game_progress is required and must be an object.' });
+    }
+
+    await db.query(
+      `INSERT INTO user_game_progress (user_id, game_progress)
+       VALUES (?, ?)
+       ON DUPLICATE KEY UPDATE game_progress = VALUES(game_progress), updated_at = CURRENT_TIMESTAMP`,
+      [user_id, JSON.stringify(game_progress)]
+    );
+
+    return res.status(200).json({ message: 'Game progress saved.' });
+  } catch (err) {
+    console.error('saveGameProgress error:', err);
+    return res.status(500).json({ message: 'Server error.' });
+  }
 };
 
 // ════════════════════════════════════════════════════════════════════════════════
@@ -489,7 +540,7 @@ const addPoints = async (req, res) => {
     const { points } = req.body;
     if (!points || points <= 0) return res.status(400).json({ message: 'points required.' });
     await db.query(
-      `INSERT INTO points_log (user_id, session_id, points_earned) VALUES (?, 0, ?)`,
+      `INSERT INTO points_log (user_id, session_id, points_earned) VALUES (?, NULL, ?)`,
       [user_id, points]
     );
     return res.status(200).json({ message: 'Points added.', points_added: points });

@@ -36,7 +36,17 @@ router.post('/game-progress', auth, async (req, res) => {
     let totalPointsSynced = 0;
     let syncedCount = 0;
 
-    const LEVEL_MAP = { strawberry: 'Easy', chocolate: 'Medium', blueberry: 'Hard' };
+    const LEVEL_MAP = {
+      strawberry:      'Easy',
+      cake_vanilla:    'Easy',
+      pie_pumpkin:     'Easy',
+      chocolate:       'Medium',
+      cake_chocolate:  'Medium',
+      pie_apple:       'Medium',
+      blueberry:       'Hard',
+      cake_blueberry:  'Hard',
+      pie_buko:        'Hard',
+    };
 
     for (const e of entries) {
       if (!e.game_type_id || !e.path || !e.level) continue;
@@ -123,7 +133,7 @@ router.post('/coins', auth, async (req, res) => {
   }
 
   try {
-    // session_id = 0 marks lesson/manual coin entries (not from a game session)
+    // session_id NULL marks lesson/manual coin entries (not from a game session)
     let syncedCount = 0;
     
     for (const e of entries) {
@@ -131,11 +141,10 @@ router.post('/coins', auth, async (req, res) => {
       
       await db.query(
         `INSERT INTO points_log (user_id, session_id, points_earned, earned_at, client_ref_id)
-         VALUES (?, ?, ?, ?, ?)
+         VALUES (?, NULL, ?, ?, ?)
          ON DUPLICATE KEY UPDATE log_id = log_id`,
         [
           user_id,
-          0,                                          // session_id = 0
           e.amount ?? 0,
           e.logged_at ? new Date(e.logged_at) : new Date(),
           e.client_ref_id
@@ -210,7 +219,7 @@ router.get('/pull', auth, async (req, res) => {
       // Points log — most recent 100
       db.query(
         `SELECT pl.log_id, pl.session_id, pl.points_earned, pl.earned_at,
-                CASE WHEN pl.session_id = 0 THEN 'lesson'
+                CASE WHEN pl.session_id IS NULL THEN 'lesson'
                      ELSE 'game' END AS source_type
          FROM points_log pl
          WHERE pl.user_id = ?

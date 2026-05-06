@@ -96,7 +96,7 @@ const getProfile = async (req, res) => {
     );
     const [[lessonPts]] = await db.query(
       `SELECT COALESCE(SUM(points_earned), 0) AS total
-       FROM points_log WHERE user_id = ? AND session_id = 0`, [user_id]
+       FROM points_log WHERE user_id = ? AND session_id IS NULL`, [user_id]
     );
 
     return res.status(200).json({
@@ -322,7 +322,7 @@ const getStudentProfile = async (req, res) => {
     );
     const [[lessonPts]] = await db.query(
       `SELECT COALESCE(SUM(points_earned), 0) AS total
-       FROM points_log WHERE user_id = ? AND session_id = 0`, [userId]
+       FROM points_log WHERE user_id = ? AND session_id IS NULL`, [userId]
     );
 
     return res.status(200).json({
