@@ -455,7 +455,7 @@ const getGameProgress = async (req, res) => {
  JOIN games      g  ON g.game_id       = gs.game_id
  JOIN game_types gt ON gt.game_type_id = gs.game_type_id
  WHERE gs.user_id = ? AND gs.total_items > 0
- GROUP BY g.game_id, g.path_id, gt.code, g.difficulty`
+ GROUP BY g.game_id, g.path_id, gt.code, g.difficulty`,
       [user_id]
     );
     // Build the { gameId: ['level1','level2'] } map the frontend expects
