@@ -57,6 +57,10 @@ const {
   getMyPoints,
   completeVideoLesson,
   completeCheckpoint,
+  getGameProgress,
+  saveGameProgress,
+  addPoints,
+  unlockAchievement,
 } = require('../controllers/gamificationController');
 
 const {
@@ -107,6 +111,7 @@ router.post('/games/:game_id/sequence/submit',        auth, checkSequence);
 router.get ('/games/:game_id',                        auth, getGameById); // ← wildcard LAST
 
 // ── Gamification ──────────────────────────────────────────────────────────────
+router.post('/points',              auth, addPoints);
 router.post('/game-sessions',       auth, createGameSession);
 router.get ('/game-sessions',       auth, getMyGameSessions);
 router.get ('/leaderboard',         auth, getLeaderboard);
@@ -114,6 +119,9 @@ router.get ('/badges',              auth, getMyBadges);
 router.get ('/points',              auth, getMyPoints);
 router.post('/video-complete',      auth, completeVideoLesson);
 router.post('/checkpoint-complete', auth, completeCheckpoint);
+router.get ('/game-progress',       auth, getGameProgress);
+router.post('/game-progress',       auth, saveGameProgress);
+router.post('/achievements/:achievementId/unlock/:studentId', auth, unlockAchievement);
 
 router.get('/game-dashboard', auth, getGameDashboard);
 router.get('/achievements',   auth, getAchievements);

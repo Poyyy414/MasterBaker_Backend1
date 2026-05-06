@@ -68,9 +68,9 @@ const getStudentOverview = async (req, res) => {
       let passedGames = 0;
       if (totalGames > 0) {
         const [[pRow]] = await db.query(
-          `SELECT COUNT(DISTINCT recipe_id) AS passed
+          `SELECT COUNT(DISTINCT game_id) AS passed
            FROM game_sessions
-           WHERE user_id = ? AND recipe_id IN (?)
+           WHERE user_id = ? AND game_id IN (?)
              AND total_items > 0 AND (score / total_items) >= 0.6`,
           [student_id, gameIds]
         );
@@ -338,7 +338,7 @@ const getStudentGameProgress = async (req, res) => {
             `SELECT session_id, score, total_items, points_earned, completed_at,
                CASE WHEN total_items > 0 THEN ROUND((score / total_items) * 100) ELSE 0 END AS score_percent
              FROM game_sessions
-             WHERE user_id = ? AND recipe_id = ? AND game_type_id = ?
+             WHERE user_id = ? AND game_id = ? AND game_type_id = ?
              ORDER BY completed_at ASC`,
             [student_id, game.game_id, gt.game_type_id]
           );

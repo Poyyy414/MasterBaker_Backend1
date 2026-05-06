@@ -36,35 +36,48 @@ router.post('/game-progress', auth, async (req, res) => {
     let totalPointsSynced = 0;
     let syncedCount = 0;
 
+    const LEVEL_MAP = { strawberry: 'Easy', chocolate: 'Medium', blueberry: 'Hard' };
+
     for (const e of entries) {
-      if (!e.game_id || !e.game_type_id) continue;
-      if (!e.client_ref_id) continue; // Require client_ref_id for deduplication
+      if (!e.game_type_id || !e.path || !e.level) continue;
+      if (!e.client_ref_id) continue;
+
+      const difficulty = LEVEL_MAP[e.level];
+      if (!difficulty) continue;
+
+      // Look up game_id from path + difficulty + game_type_id (same logic as createGameSession)
+      const [gameRows] = await conn.query(
+        `SELECT g.game_id FROM games g
+         JOIN paths p ON p.path_id = g.path_id
+         WHERE LOWER(p.name) = ? AND g.game_type_id = ? AND LOWER(g.difficulty) = LOWER(?)
+           AND g.parent_game_id IS NOT NULL`,
+        [e.path.toLowerCase(), e.game_type_id, difficulty]
+      );
+      if (gameRows.length === 0) continue;
+      const game_id = gameRows[0].game_id;
 
       const points = e.points_earned ?? 0;
       const played = e.played_at ? new Date(e.played_at) : new Date();
 
-      // Check if we already have a higher or equal score for this game/type
       const [[{ max_score }]] = await conn.query(
         `SELECT COALESCE(MAX(score), -1) AS max_score
          FROM game_sessions
-         WHERE user_id = ? AND recipe_id = ? AND game_type_id = ?`,
-        [user_id, e.game_id, e.game_type_id]
+         WHERE user_id = ? AND game_id = ? AND game_type_id = ?`,
+        [user_id, game_id, e.game_type_id]
       );
 
-      if (max_score >= (e.score ?? 0)) continue; // Skip if existing score is higher or equal
+      if (max_score >= (e.score ?? 0)) continue;
 
-      // Insert game session with client_ref_id for deduplication
       const [result] = await conn.query(
         `INSERT INTO game_sessions
-           (user_id, recipe_id, game_type_id, score, total_items, points_earned, completed_at, client_ref_id)
+           (user_id, game_id, game_type_id, score, total_items, points_earned, completed_at, client_ref_id)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
          ON DUPLICATE KEY UPDATE session_id = session_id`,
-        [user_id, e.game_id, e.game_type_id,
+        [user_id, game_id, e.game_type_id,
          e.score ?? 0, e.total_items ?? 0, points, played, e.client_ref_id]
       );
       syncedCount++;
 
-      // Log points (session_id > 0 = game points)
       if (points > 0) {
         await conn.query(
           `INSERT INTO points_log (user_id, session_id, points_earned, earned_at)
@@ -178,7 +191,7 @@ router.get('/pull', auth, async (req, res) => {
 
       // Game sessions — most recent 100
       db.query(
-        `SELECT gs.session_id, gs.recipe_id AS game_id, gs.game_type_id,
+        `SELECT gs.session_id, gs.game_id AS game_id, gs.game_type_id,
                 gt.code AS game_type_code, gt.name AS game_type_name,
                 g.title AS game_title,
                 gs.score, gs.total_items, gs.points_earned, gs.completed_at,
@@ -187,7 +200,7 @@ router.get('/pull', auth, async (req, res) => {
                      ELSE 0 END AS score_percent
          FROM game_sessions gs
          JOIN game_types gt ON gt.game_type_id = gs.game_type_id
-         LEFT JOIN games  g  ON g.game_id       = gs.recipe_id
+         LEFT JOIN games  g  ON g.game_id       = gs.game_id
          WHERE gs.user_id = ?
          ORDER BY gs.completed_at DESC
          LIMIT 100`,

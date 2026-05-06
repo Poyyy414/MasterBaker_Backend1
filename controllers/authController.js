@@ -116,4 +116,20 @@ const login = async (req, res) => {
   }
 };
 
-module.exports = { register, login };
+const refresh = async (req, res) => {
+  try {
+    const { refreshToken } = req.body;
+    if (!refreshToken) return res.status(400).json({ message: 'refreshToken required.' });
+    const decoded = jwt.verify(refreshToken, process.env.JWT_SECRET);
+    const newToken = jwt.sign(
+      { user_id: decoded.user_id, role: decoded.role, role_id: decoded.role_id },
+      process.env.JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+    return res.status(200).json({ accessToken: newToken });
+  } catch {
+    return res.status(403).json({ message: 'Invalid or expired refresh token.' });
+  }
+};
+
+module.exports = { register, login, refresh };

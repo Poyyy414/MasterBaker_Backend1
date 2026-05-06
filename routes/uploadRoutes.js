@@ -26,7 +26,7 @@ const auth = verifyToken;
 
 // POST /api/upload/avatar   — upload or replace avatar
 // DELETE /api/upload/avatar — remove avatar
-router.post  ('/avatar', auth, upload.single('avatar'), uploadAvatar);
+router.post  ('/avatar', auth, uploadAvatar);
 router.delete('/avatar', auth, deleteAvatar);
 
 // ── Multer error handler ──────────────────────────────────────────────────────

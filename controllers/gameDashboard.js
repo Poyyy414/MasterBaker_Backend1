@@ -5,7 +5,7 @@ const db = require('../config/db');
 // ════════════════════════════════════════════════════════════════════════════════
 const getGameDashboard = async (req, res) => {
   try {
-    const user_id = req.user.role_id;
+    const user_id = req.user.user_id;
 
     const [paths] = await db.query(
       `SELECT path_id, name, description, image_url
@@ -56,7 +56,7 @@ const getGameDashboard = async (req, res) => {
 const getPathGames = async (req, res) => {
   try {
     const { path_id } = req.params;
-    const user_id     = req.user.role_id;
+    const user_id     = req.user.user_id;
 
     const [pathRows] = await db.query(
       `SELECT path_id, name FROM paths WHERE path_id = ?`,
@@ -194,7 +194,7 @@ const getPathGames = async (req, res) => {
 // ════════════════════════════════════════════════════════════════════════════════
 const getAchievements = async (req, res) => {
   try {
-    const user_id = req.user.role_id;
+    const user_id = req.user.user_id;
 
     const [[pointsRow]] = await db.query(
       `SELECT COALESCE(SUM(points_earned), 0) AS total_points

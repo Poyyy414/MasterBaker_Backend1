@@ -444,6 +444,78 @@ const getMyPoints = async (req, res) => {
   }
 };
 
+// ════════════════════════════════════════════════════════════════════════════════
+// GET /api/student/game-progress
+const getGameProgress = async (req, res) => {
+  try {
+    const user_id = req.user.user_id;
+    const [sessions] = await db.query(
+      `SELECT g.path_id, gt.code AS game_type_code, g.difficulty,
+              MAX(gs.score / gs.total_items) AS best_ratio
+       FROM game_sessions gs
+       JOIN games      g  ON g.game_id       = gs.game_id
+       JOIN game_types gt ON gt.game_type_id = gs.game_type_id
+       WHERE gs.user_id = ? AND gs.total_items > 0
+       GROUP BY g.game_id`,
+      [user_id]
+    );
+    // Build the { gameId: ['level1','level2'] } map the frontend expects
+    const progress = {};
+    for (const s of sessions) {
+      if ((s.best_ratio ?? 0) < 0.6) continue;
+      const key = `${s.game_type_code}_path${s.path_id}`.toLowerCase();
+      if (!progress[key]) progress[key] = [];
+      if (!progress[key].includes(s.difficulty.toLowerCase()))
+        progress[key].push(s.difficulty.toLowerCase());
+    }
+    return res.status(200).json({ game_progress: progress });
+  } catch (err) {
+    console.error('getGameProgress error:', err);
+    return res.status(500).json({ message: 'Server error.' });
+  }
+};
+
+// POST /api/student/game-progress  (client pushes its local map)
+const saveGameProgress = async (req, res) => {
+  // Progress is derived from game_sessions on read — nothing to store.
+  // Accept and ack so the frontend doesn't see an error.
+  return res.status(200).json({ message: 'Progress acknowledged.' });
+};
+
+// ════════════════════════════════════════════════════════════════════════════════
+// POST /api/student/points
+const addPoints = async (req, res) => {
+  try {
+    const user_id = req.user.user_id;
+    const { points } = req.body;
+    if (!points || points <= 0) return res.status(400).json({ message: 'points required.' });
+    await db.query(
+      `INSERT INTO points_log (user_id, session_id, points_earned) VALUES (?, 0, ?)`,
+      [user_id, points]
+    );
+    return res.status(200).json({ message: 'Points added.', points_added: points });
+  } catch (err) {
+    console.error('addPoints error:', err);
+    return res.status(500).json({ message: 'Server error.' });
+  }
+};
+
+// POST /api/achievements/:achievementId/unlock/:studentId  (studentId = user_id here)
+const unlockAchievement = async (req, res) => {
+  try {
+    const { achievementId, studentId } = req.params;
+    // Idempotent — if already unlocked, just ack
+    await db.query(
+      `INSERT IGNORE INTO user_badges (user_id, badge_id) VALUES (?, ?)`,
+      [studentId, achievementId]
+    );
+    return res.status(200).json({ message: 'Achievement unlocked.' });
+  } catch (err) {
+    console.error('unlockAchievement error:', err);
+    return res.status(500).json({ message: 'Server error.' });
+  }
+};
+
 module.exports = {
   createGameSession,
   completeVideoLesson,
@@ -454,4 +526,8 @@ module.exports = {
   getMyPoints,
   getAttemptNumber,
   awardBadges,
+  getGameProgress,
+  saveGameProgress,
+  addPoints,
+  unlockAchievement,
 };
