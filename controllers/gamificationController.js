@@ -444,7 +444,7 @@ const getMyPoints = async (req, res) => {
        FROM points_log pl
        JOIN game_sessions gs ON pl.session_id = gs.session_id
        JOIN game_types    gt ON gs.game_type_id = gt.game_type_id
-       WHERE pl.user_id = ? AND pl.session_id > 0
+       WHERE pl.user_id = ? AND pl.session_id IS NULL
        ORDER BY pl.earned_at DESC`,
       [user_id]
     );
@@ -456,7 +456,7 @@ const getMyPoints = async (req, res) => {
          NULL AS score, NULL AS total_items,
          'lesson' AS source_type
        FROM points_log pl
-       WHERE pl.user_id = ? AND pl.session_id = 0
+       WHERE pl.user_id = ? AND pl.session_id IS NULL
        ORDER BY pl.earned_at DESC`,
       [user_id]
     );
