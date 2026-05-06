@@ -240,4 +240,124 @@ const deleteAvatar = async (req, res) => {
   }
 };
 
-module.exports = { getProfile, updateProfile, uploadAvatar, deleteAvatar };
+// ════════════════════════════════════════════════════════════════════════════════
+// GET /api/student/student-profile/:userId
+// GET /api/teacher/student-profile/:userId
+// View detailed profiles of other students (points, badges, stats)
+// ════════════════════════════════════════════════════════════════════════════════
+const getStudentProfile = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const requestingUserId = req.user.user_id;
+    const requestingUserRole = req.user.role;
+
+    // Users can view other students' profiles (but not their own via this endpoint)
+    if (userId == requestingUserId) {
+      return res.status(400).json({ message: 'Use /api/student/profile to view your own profile.' });
+    }
+
+    // User + student details
+    const [userRows] = await db.query(
+      `SELECT u.user_id, u.firstname, u.lastname, u.email,
+              u.avatar_url, u.role, u.created_at,
+              s.student_id, s.grade_level, s.section
+       FROM users u
+       LEFT JOIN students s ON s.user_id = u.user_id
+       WHERE u.user_id = ? AND u.role = 'student'`,
+      [userId]
+    );
+
+    if (!userRows[0]) {
+      return res.status(404).json({ message: 'Student not found.' });
+    }
+
+    const user = userRows[0];
+
+    // Total points
+    const [[ptRow]] = await db.query(
+      `SELECT COALESCE(SUM(points_earned), 0) AS total FROM points_log WHERE user_id = ?`,
+      [userId]
+    );
+
+    // Rank
+    const [[rankRow]] = await db.query(
+      `SELECT COUNT(*) + 1 AS rank_position
+       FROM (
+         SELECT user_id, SUM(points_earned) AS total
+         FROM points_log GROUP BY user_id
+         HAVING total > ?
+       ) higher`,
+      [ptRow.total]
+    );
+
+    // Badges
+    const [badges] = await db.query(
+      `SELECT b.badge_id, b.name, b.description, b.icon_url, ub.earned_at
+       FROM user_badges ub
+       JOIN badges b ON ub.badge_id = b.badge_id
+       WHERE ub.user_id = ?
+       ORDER BY ub.earned_at DESC`,
+      [userId]
+    );
+
+    // Game stats
+    const [[statsRow]] = await db.query(
+      `SELECT
+         COUNT(*)                                       AS total_sessions,
+         COALESCE(SUM(score), 0)                        AS total_correct,
+         COALESCE(SUM(total_items), 0)                  AS total_items,
+         COUNT(DISTINCT recipe_id)                       AS games_attempted,
+         COUNT(DISTINCT CASE
+           WHEN total_items > 0
+            AND (score / total_items) >= 0.6
+           THEN recipe_id END)                           AS games_passed
+       FROM game_sessions WHERE user_id = ?`,
+      [userId]
+    );
+
+    // Points breakdown
+    const [[gamePts]] = await db.query(
+      `SELECT COALESCE(SUM(points_earned), 0) AS total
+       FROM points_log WHERE user_id = ? AND session_id > 0`, [userId]
+    );
+    const [[lessonPts]] = await db.query(
+      `SELECT COALESCE(SUM(points_earned), 0) AS total
+       FROM points_log WHERE user_id = ? AND session_id = 0`, [userId]
+    );
+
+    return res.status(200).json({
+      user: {
+        user_id:     user.user_id,
+        firstname:   user.firstname,
+        lastname:    user.lastname,
+        email:       user.email,
+        avatar_url:  user.avatar_url || null,
+        role:        user.role,
+        member_since: user.created_at,
+        student_id:  user.student_id  || null,
+        grade_level: user.grade_level || null,
+        section:     user.section     || null,
+      },
+      points: {
+        total:        ptRow.total,
+        from_games:   gamePts.total,
+        from_lessons: lessonPts.total,
+        rank_position: rankRow.rank_position,
+      },
+      stats: {
+        total_sessions:  statsRow.total_sessions,
+        games_attempted: statsRow.games_attempted,
+        games_passed:    statsRow.games_passed,
+        overall_accuracy: statsRow.total_items > 0
+          ? Math.round((statsRow.total_correct / statsRow.total_items) * 100) : 0,
+      },
+      badges_earned: badges.length,
+      badges,
+    });
+  } catch (error) {
+    console.error('Get student profile error:', error);
+    return res.status(500).json({ message: 'Server error.' });
+  }
+};
+
+module.exports = { getProfile, updateProfile, uploadAvatar, deleteAvatar, getStudentProfile };

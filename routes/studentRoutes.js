@@ -47,6 +47,8 @@ const {
   checkSequence,
 } = require('../controllers/sequenceController');
 
+const { getProfile, getStudentProfile } = require('../controllers/userProfileController');
+
 const {
   createGameSession,
   getMyGameSessions,
@@ -115,6 +117,10 @@ router.post('/checkpoint-complete', auth, completeCheckpoint);
 
 router.get('/game-dashboard', auth, getGameDashboard);
 router.get('/achievements',   auth, getAchievements);
+
+// ── Profile ───────────────────────────────────────────────────────────────────
+router.get('/profile',                    auth, getProfile);
+router.get('/student-profile/:userId',    auth, getStudentProfile);
 
 router.get   ('/',    auth, getAllStudents);
 router.get   ('/:id', auth, getStudentById);

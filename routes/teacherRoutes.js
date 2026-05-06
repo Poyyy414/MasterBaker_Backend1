@@ -11,6 +11,8 @@ const {
   deleteTeacher,
 } = require('../controllers/teacherController');
 
+const { getStudentProfile } = require('../controllers/userProfileController');
+
 const {
   createActivity,
   getAllActivities,
@@ -139,6 +141,9 @@ router.get   ('/students/:student_id/checkpoints',     auth, getStudentCheckpoin
 
 // ── Leaderboard ───────────────────────────────────────────────────────────────
 router.get   ('/leaderboard',                          auth, getLeaderboard);
+
+// ── Student profiles ──────────────────────────────────────────────────────────
+router.get   ('/student-profile/:userId',              auth, getStudentProfile);
 
 // ── Teacher profile (/:id MUST be last) ──────────────────────────────────────
 router.get   ('/',    auth, getAllTeachers);
