@@ -71,7 +71,7 @@ const createGameSession = async (req, res) => {
   try {
     await conn.beginTransaction();
 
-    const user_id = req.user.role_id;
+    const user_id = req.user.user_id;
     const {
       game_type,
       path,
@@ -215,7 +215,7 @@ const completeVideoLesson = async (req, res) => {
   try {
     await conn.beginTransaction();
 
-    const user_id = req.user.role_id;
+    const user_id = req.user.user_id;
     const { video_id, activity_id } = req.body;
 
     if (!video_id || !activity_id)
@@ -269,7 +269,7 @@ const completeCheckpoint = async (req, res) => {
   try {
     await conn.beginTransaction();
 
-    const user_id = req.user.role_id;
+    const user_id = req.user.user_id;
     const { checkpoint_id, correct_count, difficulty = 'easy', activity_id } = req.body;
 
     if (!checkpoint_id || correct_count == null || !activity_id)
@@ -310,7 +310,7 @@ const completeCheckpoint = async (req, res) => {
 // ════════════════════════════════════════════════════════════════════════════════
 const getMyGameSessions = async (req, res) => {
   try {
-    const user_id = req.user.role_id;
+    const user_id = req.user.user_id;
     const [rows] = await db.query(
       `SELECT gs.*, gt.name AS game_type_name, gt.code AS game_type_code
        FROM game_sessions gs
@@ -335,10 +335,11 @@ const getLeaderboard = async (req, res) => {
   try {
     const [rows] = await db.query(`
       SELECT
-        ranked.student_id,
         ranked.user_id,
         ranked.firstname,
         ranked.lastname,
+        ranked.role,
+        ranked.avatar_url,
         ranked.total_points,
         ranked.games_played,
         ranked.lessons_completed,
@@ -347,32 +348,32 @@ const getLeaderboard = async (req, res) => {
         ) AS rank_position
       FROM (
         SELECT
-          s.student_id,
           u.user_id,
           u.firstname,
           u.lastname,
+          u.role,
+          u.avatar_url,
           CAST(COALESCE(points.total_points, 0) AS UNSIGNED) AS total_points,
           COALESCE(games.games_played, 0)                    AS games_played,
           COALESCE(lessons.lessons_completed, 0)             AS lessons_completed
         FROM users u
-        JOIN students s ON s.user_id = u.user_id
+        LEFT JOIN students s ON s.user_id = u.user_id
         LEFT JOIN (
-          SELECT user_id AS student_id, SUM(points_earned) AS total_points
+          SELECT user_id, SUM(points_earned) AS total_points
           FROM points_log
           GROUP BY user_id
-        ) points ON points.student_id = s.student_id
+        ) points ON points.user_id = u.user_id
         LEFT JOIN (
-          SELECT user_id AS student_id, COUNT(*) AS games_played
+          SELECT user_id, COUNT(*) AS games_played
           FROM game_sessions
           GROUP BY user_id
-        ) games ON games.student_id = s.student_id
+        ) games ON games.user_id = u.user_id
         LEFT JOIN (
-          SELECT student_id, COUNT(DISTINCT activity_id) AS lessons_completed
+          SELECT student_id AS user_id, COUNT(DISTINCT activity_id) AS lessons_completed
           FROM student_progress
           WHERE is_completed = 1
           GROUP BY student_id
-        ) lessons ON lessons.student_id = s.student_id
-        WHERE u.role = 'student'
+        ) lessons ON lessons.user_id = u.user_id
       ) ranked
       ORDER BY ranked.total_points DESC, ranked.user_id ASC
     `);
@@ -389,7 +390,7 @@ const getLeaderboard = async (req, res) => {
 // ════════════════════════════════════════════════════════════════════════════════
 const getMyBadges = async (req, res) => {
   try {
-    const user_id = req.user.role_id;
+    const user_id = req.user.user_id;
     const [rows] = await db.query(
       `SELECT b.badge_id, b.name, b.description, b.icon_url, ub.earned_at
        FROM user_badges ub
@@ -411,7 +412,7 @@ const getMyBadges = async (req, res) => {
 // ════════════════════════════════════════════════════════════════════════════════
 const getMyPoints = async (req, res) => {
   try {
-    const user_id = req.user.role_id;
+    const user_id = req.user.user_id;
 
     const [gameRows] = await db.query(
       `SELECT

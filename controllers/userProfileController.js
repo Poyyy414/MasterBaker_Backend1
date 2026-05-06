@@ -32,7 +32,7 @@ const _uploadToCloudinary = (buffer, folder, publicId) =>
 // ════════════════════════════════════════════════════════════════════════════════
 const getProfile = async (req, res) => {
   try {
-    const user_id = req.user.role_id;
+    const user_id = req.user.user_id;
 
     // User + student details
     const [userRows] = await db.query(
@@ -143,7 +143,7 @@ const getProfile = async (req, res) => {
 // ════════════════════════════════════════════════════════════════════════════════
 const updateProfile = async (req, res) => {
   try {
-    const user_id = req.user.role_id;
+    const user_id = req.user.user_id;
     const { firstname, lastname, email } = req.body;
 
     if (!firstname && !lastname && !email) {
@@ -183,7 +183,7 @@ const updateProfile = async (req, res) => {
 // ════════════════════════════════════════════════════════════════════════════════
 const uploadAvatar = async (req, res) => {
   try {
-    const user_id = req.user.role_id;
+    const user_id = req.user.user_id;
 
     if (!req.file) {
       return res.status(400).json({ message: 'No image file provided.' });
@@ -220,7 +220,7 @@ const uploadAvatar = async (req, res) => {
 // ════════════════════════════════════════════════════════════════════════════════
 const deleteAvatar = async (req, res) => {
   try {
-    const user_id = req.user.role_id;
+    const user_id = req.user.user_id;
 
     // Delete from Cloudinary
     try {
