@@ -364,6 +364,7 @@ const getLeaderboard = async (req, res) => {
           WHERE is_completed = 1
           GROUP BY student_id
         ) lessons ON lessons.user_id = u.user_id
+        WHERE u.role = 'student'
         GROUP BY u.user_id, u.firstname, u.lastname, u.role, u.avatar_url, lessons.lessons_completed
       ) ranked
       ORDER BY ranked.total_points DESC, ranked.user_id ASC
