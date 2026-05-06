@@ -9,12 +9,11 @@ const register = async (req, res) => {
     await conn.beginTransaction();
 
     const { firstname, lastname, email, password, grade_level, section, specialization, department } = req.body;
-    const role = req.body.role?.toLowerCase().trim(); // normalize here
+    const role = req.body.role?.toLowerCase().trim();
 
     if (!firstname || !lastname || !email || !password || !role) {
       return res.status(400).json({ message: 'firstname, lastname, email, password, and role are required.' });
     }
-
     if (!['student', 'teacher'].includes(role)) {
       return res.status(400).json({ message: 'Role must be student or teacher.' });
     }
@@ -28,18 +27,19 @@ const register = async (req, res) => {
 
     const [userResult] = await conn.query(
       `INSERT INTO users (firstname, lastname, email, password, role) VALUES (?, ?, ?, ?, ?)`,
-      [firstname, lastname, email, hashedPassword, role] // role is now always lowercase
+      [firstname, lastname, email, hashedPassword, role]
     );
     const user_id = userResult.insertId;
 
     if (role === 'student') {
+      // INSERT IGNORE prevents crash if student row somehow already exists
       await conn.query(
-        `INSERT INTO students (user_id, grade_level, section) VALUES (?, ?, ?)`,
+        `INSERT IGNORE INTO students (user_id, grade_level, section) VALUES (?, ?, ?)`,
         [user_id, grade_level || null, section || null]
       );
     } else if (role === 'teacher') {
       await conn.query(
-        `INSERT INTO teachers (user_id, specialization, department) VALUES (?, ?, ?)`,
+        `INSERT IGNORE INTO teachers (user_id, specialization, department) VALUES (?, ?, ?)`,
         [user_id, specialization || null, department || null]
       );
     }
@@ -71,13 +71,12 @@ const login = async (req, res) => {
     }
 
     const user = rows[0];
-
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
       return res.status(401).json({ message: 'Invalid email or password.' });
     }
 
-    const role = user.role?.toLowerCase().trim(); // normalize from DB too
+    const role = user.role?.toLowerCase().trim();
 
     let role_id = null;
     if (role === 'student') {
@@ -88,8 +87,11 @@ const login = async (req, res) => {
       role_id = t[0]?.teacher_id || null;
     }
 
+    // ── IMPORTANT: token carries BOTH user_id AND role_id ──────────────────
+    // user_id  → used for game_sessions, points_log, user_badges (all use user_id)
+    // role_id  → student_id or teacher_id (used for student_progress)
     const token = jwt.sign(
-      { user_id: user.user_id, role, role_id }, // always lowercase in token
+      { user_id: user.user_id, role, role_id },
       process.env.JWT_SECRET,
       { expiresIn: '7d' }
     );
@@ -104,6 +106,7 @@ const login = async (req, res) => {
         lastname:  user.lastname,
         email:     user.email,
         role,
+        avatar_url: user.avatar_url || null,
       },
     });
 
