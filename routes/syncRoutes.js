@@ -133,7 +133,7 @@ router.post('/coins', auth, async (req, res) => {
   }
 
   try {
-    // session_id NULL marks lesson/manual coin entries (not from a game session)
+    // session_id = 0 marks lesson/manual coin entries (not from a game session)
     let syncedCount = 0;
     
     for (const e of entries) {
@@ -141,7 +141,7 @@ router.post('/coins', auth, async (req, res) => {
       
       await db.query(
         `INSERT INTO points_log (user_id, session_id, points_earned, earned_at, client_ref_id)
-         VALUES (?, NULL, ?, ?, ?)
+         VALUES (?, 0, ?, ?, ?)
          ON DUPLICATE KEY UPDATE log_id = log_id`,
         [
           user_id,
@@ -219,7 +219,7 @@ router.get('/pull', auth, async (req, res) => {
       // Points log — most recent 100
       db.query(
         `SELECT pl.log_id, pl.session_id, pl.points_earned, pl.earned_at,
-                CASE WHEN pl.session_id IS NULL THEN 'lesson'
+                CASE WHEN pl.session_id = 0 THEN 'lesson'
                      ELSE 'game' END AS source_type
          FROM points_log pl
          WHERE pl.user_id = ?

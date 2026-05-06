@@ -268,7 +268,7 @@ const completeVideoLesson = async (req, res) => {
     );
 
     await conn.query(
-      `INSERT INTO points_log (user_id, session_id, points_earned) VALUES (?, NULL, ?)`,
+      `INSERT INTO points_log (user_id, session_id, points_earned) VALUES (?, 0, ?)`,
       [user_id, POINTS.VIDEO_LESSON_COMPLETED]
     );
 
@@ -310,7 +310,7 @@ const completeCheckpoint = async (req, res) => {
     const points_earned = correct_count * ptsPerCorrect;
 
     await conn.query(
-      `INSERT INTO points_log (user_id, session_id, points_earned) VALUES (?, NULL, ?)`,
+      `INSERT INTO points_log (user_id, session_id, points_earned) VALUES (?, 0, ?)`,
       [user_id, points_earned]
     );
 
@@ -453,7 +453,7 @@ const getMyPoints = async (req, res) => {
          NULL AS score, NULL AS total_items,
          'lesson' AS source_type
        FROM points_log pl
-       WHERE pl.user_id = ? AND pl.session_id IS NULL
+       WHERE pl.user_id = ? AND pl.session_id = 0
        ORDER BY pl.earned_at DESC`,
       [user_id]
     );
@@ -540,7 +540,7 @@ const addPoints = async (req, res) => {
     const { points } = req.body;
     if (!points || points <= 0) return res.status(400).json({ message: 'points required.' });
     await db.query(
-      `INSERT INTO points_log (user_id, session_id, points_earned) VALUES (?, NULL, ?)`,
+      `INSERT INTO points_log (user_id, session_id, points_earned) VALUES (?, 0, ?)`,
       [user_id, points]
     );
     return res.status(200).json({ message: 'Points added.', points_added: points });
