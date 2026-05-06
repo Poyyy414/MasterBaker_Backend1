@@ -80,11 +80,11 @@ const getProfile = async (req, res) => {
          COUNT(*)                                       AS total_sessions,
          COALESCE(SUM(score), 0)                        AS total_correct,
          COALESCE(SUM(total_items), 0)                  AS total_items,
-         COUNT(DISTINCT recipe_id)                       AS games_attempted,
+         COUNT(DISTINCT game_id)                       AS games_attempted,
          COUNT(DISTINCT CASE
            WHEN total_items > 0
             AND (score / total_items) >= 0.6
-           THEN recipe_id END)                           AS games_passed
+           THEN game_id END)                           AS games_passed
        FROM game_sessions WHERE user_id = ?`,
       [user_id]
     );

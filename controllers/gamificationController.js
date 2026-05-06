@@ -162,17 +162,16 @@ const createGameSession = async (req, res) => {
 
     // ── Save session ──────────────────────────────────────────────────────────
     const [result] = await conn.query(
-      `INSERT INTO game_sessions (user_id, game_id, game_type_id, score, total_items, points_earned)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [user_id, game_id, game_type_id, score, total, points_earned]
-    );
-    const session_id = result.insertId;
+  `INSERT INTO game_sessions (user_id, game_id, game_type_id, score, total_items, points_earned)
+   VALUES (?, ?, ?, ?, ?, ?)`,
+  [user_id, game_id, game_type_id, score, total_items, points_earned]
+);
+const session_id = result.insertId; // ← use this, NOT 0
 
-    // ── Log points ────────────────────────────────────────────────────────────
-    await conn.query(
-      `INSERT INTO points_log (user_id, session_id, points_earned) VALUES (?, ?, ?)`,
-      [user_id, session_id, points_earned]
-    );
+await conn.query(
+  `INSERT INTO points_log (user_id, session_id, points_earned) VALUES (?, ?, ?)`,
+  [user_id, session_id, points_earned]
+);
 
     // ── Award badges ──────────────────────────────────────────────────────────
     const badges_earned = await awardBadges(conn, user_id, score, total);
@@ -451,12 +450,12 @@ const getGameProgress = async (req, res) => {
     const user_id = req.user.user_id;
     const [sessions] = await db.query(
       `SELECT g.path_id, gt.code AS game_type_code, g.difficulty,
-              MAX(gs.score / gs.total_items) AS best_ratio
-       FROM game_sessions gs
-       JOIN games      g  ON g.game_id       = gs.game_id
-       JOIN game_types gt ON gt.game_type_id = gs.game_type_id
-       WHERE gs.user_id = ? AND gs.total_items > 0
-       GROUP BY g.game_id`,
+        MAX(gs.score / gs.total_items) AS best_ratio
+ FROM game_sessions gs
+ JOIN games      g  ON g.game_id       = gs.game_id
+ JOIN game_types gt ON gt.game_type_id = gs.game_type_id
+ WHERE gs.user_id = ? AND gs.total_items > 0
+ GROUP BY g.game_id, g.path_id, gt.code, g.difficulty`
       [user_id]
     );
     // Build the { gameId: ['level1','level2'] } map the frontend expects
