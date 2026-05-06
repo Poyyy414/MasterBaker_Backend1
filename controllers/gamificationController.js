@@ -38,7 +38,8 @@ const awardBadges = async (conn, user_id, score, total_items) => {
   const newBadges = [];
 
   const [sessions] = await conn.query(
-    `SELECT COUNT(*) AS cnt FROM game_sessions WHERE user_id = ?`, [user_id]
+    `SELECT COUNT(*) AS cnt FROM game_sessions WHERE user_id = ?`,
+    [user_id]
   );
   const sessionCount = sessions[0].cnt;
 
@@ -86,6 +87,7 @@ const _tryAwardBadge = async (conn, user_id, badge_id) => {
 // ════════════════════════════════════════════════════════════════════════════════
 // SAVE GAME SESSION + LOG POINTS + AUTO-AWARD BADGES
 // POST /api/student/game-sessions
+// Body: { game_type, path, level, score, total, is_time_attack }
 // ════════════════════════════════════════════════════════════════════════════════
 const createGameSession = async (req, res) => {
   const conn = await db.getConnection();
@@ -108,7 +110,7 @@ const createGameSession = async (req, res) => {
       });
     }
 
-    // ── Map game_type string → DB code ────────────────────────────────────────
+    // ── Map game_type string → DB code ───────────────────────────────────────
     const GAME_TYPE_MAP = {
       pick_right_ingredient: 'PICK_INGREDIENT',
       sequential_baking:     'TAG_SEQUENCE',
@@ -123,7 +125,8 @@ const createGameSession = async (req, res) => {
     }
 
     const [gtRows] = await conn.query(
-      `SELECT game_type_id FROM game_types WHERE code = ?`, [code]
+      `SELECT game_type_id FROM game_types WHERE code = ?`,
+      [code]
     );
     if (gtRows.length === 0) {
       return res.status(400).json({ message: 'game_type not found in DB.' });
@@ -132,15 +135,15 @@ const createGameSession = async (req, res) => {
 
     // ── Map level string → difficulty ─────────────────────────────────────────
     const LEVEL_MAP = {
-      strawberry:     'easy',
-      cake_vanilla:   'easy',
-      pie_pumpkin:    'easy',
-      chocolate:      'medium',
-      cake_chocolate: 'medium',
-      pie_apple:      'medium',
-      blueberry:      'hard',
-      cake_blueberry: 'hard',
-      pie_buko:       'hard',
+      strawberry:      'easy',
+      cake_vanilla:    'easy',
+      pie_pumpkin:     'easy',
+      chocolate:       'medium',
+      cake_chocolate:  'medium',
+      pie_apple:       'medium',
+      blueberry:       'hard',
+      cake_blueberry:  'hard',
+      pie_buko:        'hard',
     };
 
     const difficulty = LEVEL_MAP[level];
@@ -158,7 +161,7 @@ const createGameSession = async (req, res) => {
        WHERE LOWER(p.name)       = ?
          AND g.game_type_id      = ?
          AND LOWER(g.difficulty) = LOWER(?)
-         AND g.parent_game_id    IS NOT NULL`,
+         AND g.parent_game_id IS NOT NULL`,
       [path.toLowerCase(), game_type_id, difficulty]
     );
 
@@ -169,10 +172,10 @@ const createGameSession = async (req, res) => {
     }
     const game_id = gameRows[0].game_id;
 
-    // ── Attempt number ─────────────────────────────────────────────────────────
+    // ── Attempt number ────────────────────────────────────────────────────────
     const attemptNumber = await getAttemptNumber(conn, user_id, game_id, game_type_id);
 
-    // ── Calculate points ───────────────────────────────────────────────────────
+    // ── Calculate points ──────────────────────────────────────────────────────
     let rawPoints = 0;
     if (code === 'PICK_INGREDIENT') {
       rawPoints = score * POINTS.PTRI_CORRECT_INGREDIENT
@@ -187,7 +190,7 @@ const createGameSession = async (req, res) => {
 
     const points_earned = applyTryAgain(rawPoints, attemptNumber);
 
-    // ── Save session ───────────────────────────────────────────────────────────
+    // ── Save session ──────────────────────────────────────────────────────────
     const [result] = await conn.query(
       `INSERT INTO game_sessions (user_id, game_id, game_type_id, score, total_items, points_earned)
        VALUES (?, ?, ?, ?, ?, ?)`,
@@ -195,12 +198,13 @@ const createGameSession = async (req, res) => {
     );
     const session_id = result.insertId;
 
+    // ── Log points ────────────────────────────────────────────────────────────
     await conn.query(
       `INSERT INTO points_log (user_id, session_id, points_earned) VALUES (?, ?, ?)`,
       [user_id, session_id, points_earned]
     );
 
-    // ── Award badges ───────────────────────────────────────────────────────────
+    // ── Award badges ──────────────────────────────────────────────────────────
     const badges_earned = await awardBadges(conn, user_id, score, total);
 
     await conn.commit();
@@ -235,6 +239,7 @@ const createGameSession = async (req, res) => {
 // ════════════════════════════════════════════════════════════════════════════════
 // LOG VIDEO LESSON COMPLETION
 // POST /api/student/video-complete
+// Body: { video_id, activity_id }
 // ════════════════════════════════════════════════════════════════════════════════
 const completeVideoLesson = async (req, res) => {
   const conn = await db.getConnection();
@@ -289,6 +294,7 @@ const completeVideoLesson = async (req, res) => {
 // ════════════════════════════════════════════════════════════════════════════════
 // LOG CHECKPOINT COMPLETION
 // POST /api/student/checkpoint-complete
+// Body: { checkpoint_id, correct_count, difficulty, activity_id }
 // ════════════════════════════════════════════════════════════════════════════════
 const completeCheckpoint = async (req, res) => {
   const conn = await db.getConnection();
@@ -383,8 +389,8 @@ const getLeaderboard = async (req, res) => {
           COUNT(DISTINCT gs.session_id)          AS games_played,
           COALESCE(lessons.lessons_completed, 0) AS lessons_completed
         FROM users u
-        LEFT JOIN points_log pl ON pl.user_id = u.user_id
-        LEFT JOIN game_sessions gs ON gs.user_id = u.user_id
+        LEFT JOIN points_log pl     ON pl.user_id = u.user_id
+        LEFT JOIN game_sessions gs  ON gs.user_id = u.user_id
         LEFT JOIN (
           SELECT student_id AS user_id,
                  COUNT(DISTINCT activity_id) AS lessons_completed
@@ -435,12 +441,13 @@ const getMyPoints = async (req, res) => {
   try {
     const user_id = req.user.user_id;
 
+    // Points from game sessions
     const [gameRows] = await db.query(
       `SELECT
          pl.log_id, pl.points_earned, pl.earned_at,
-         gt.name  AS source_name,
+         gt.name AS source_name,
          gs.score, gs.total_items,
-         'game'   AS source_type
+         'game' AS source_type
        FROM points_log pl
        JOIN game_sessions gs ON pl.session_id = gs.session_id
        JOIN game_types    gt ON gs.game_type_id = gt.game_type_id
@@ -449,6 +456,7 @@ const getMyPoints = async (req, res) => {
       [user_id]
     );
 
+    // Points from lessons/checkpoints (no session)
     const [lessonRows] = await db.query(
       `SELECT
          pl.log_id, pl.points_earned, pl.earned_at,
@@ -543,16 +551,22 @@ const saveGameProgress = async (req, res) => {
 // ════════════════════════════════════════════════════════════════════════════════
 // ADD POINTS MANUALLY
 // POST /api/student/points
+// Body: { points }
 // ════════════════════════════════════════════════════════════════════════════════
 const addPoints = async (req, res) => {
   try {
     const user_id = req.user.user_id;
     const { points } = req.body;
-    if (!points || points <= 0) return res.status(400).json({ message: 'points required.' });
+
+    if (!points || points <= 0) {
+      return res.status(400).json({ message: 'points required.' });
+    }
+
     await db.query(
       `INSERT INTO points_log (user_id, session_id, points_earned) VALUES (?, NULL, ?)`,
       [user_id, points]
     );
+
     return res.status(200).json({ message: 'Points added.', points_added: points });
   } catch (err) {
     console.error('addPoints error:', err);
