@@ -22,7 +22,7 @@ const auth = verifyToken;
 // }
 // ════════════════════════════════════════════════════════════════════════════════
 router.post('/game-progress', auth, async (req, res) => {
-  const user_id   = req.user.role_id;
+  const user_id   = req.user.user_id;
   const { entries } = req.body;
 
   if (!Array.isArray(entries) || entries.length === 0) {
@@ -34,21 +34,35 @@ router.post('/game-progress', auth, async (req, res) => {
     await conn.beginTransaction();
 
     let totalPointsSynced = 0;
+    let syncedCount = 0;
 
     for (const e of entries) {
       if (!e.game_id || !e.game_type_id) continue;
+      if (!e.client_ref_id) continue; // Require client_ref_id for deduplication
 
       const points = e.points_earned ?? 0;
       const played = e.played_at ? new Date(e.played_at) : new Date();
 
-      // Insert game session
+      // Check if we already have a higher or equal score for this game/type
+      const [[{ max_score }]] = await conn.query(
+        `SELECT COALESCE(MAX(score), -1) AS max_score
+         FROM game_sessions
+         WHERE user_id = ? AND recipe_id = ? AND game_type_id = ?`,
+        [user_id, e.game_id, e.game_type_id]
+      );
+
+      if (max_score >= (e.score ?? 0)) continue; // Skip if existing score is higher or equal
+
+      // Insert game session with client_ref_id for deduplication
       const [result] = await conn.query(
         `INSERT INTO game_sessions
-           (user_id, recipe_id, game_type_id, score, total_items, points_earned, completed_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+           (user_id, recipe_id, game_type_id, score, total_items, points_earned, completed_at, client_ref_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE session_id = session_id`,
         [user_id, e.game_id, e.game_type_id,
-         e.score ?? 0, e.total_items ?? 0, points, played]
+         e.score ?? 0, e.total_items ?? 0, points, played, e.client_ref_id]
       );
+      syncedCount++;
 
       // Log points (session_id > 0 = game points)
       if (points > 0) {
@@ -65,7 +79,7 @@ router.post('/game-progress', auth, async (req, res) => {
 
     return res.status(200).json({
       message:      'Game progress synced.',
-      synced:       entries.length,
+      synced:       syncedCount,
       points_added: totalPointsSynced,
     });
   } catch (err) {
@@ -88,7 +102,7 @@ router.post('/game-progress', auth, async (req, res) => {
 // }
 // ════════════════════════════════════════════════════════════════════════════════
 router.post('/coins', auth, async (req, res) => {
-  const user_id   = req.user.role_id;
+  const user_id   = req.user.user_id;
   const { entries } = req.body;
 
   if (!Array.isArray(entries) || entries.length === 0) {
@@ -97,22 +111,29 @@ router.post('/coins', auth, async (req, res) => {
 
   try {
     // session_id = 0 marks lesson/manual coin entries (not from a game session)
-    const values = entries.map(e => [
-      user_id,
-      0,                                          // session_id = 0
-      e.amount ?? 0,
-      e.logged_at ? new Date(e.logged_at) : new Date(),
-    ]);
-
-    await db.query(
-      `INSERT INTO points_log (user_id, session_id, points_earned, earned_at)
-       VALUES ?`,
-      [values]
-    );
+    let syncedCount = 0;
+    
+    for (const e of entries) {
+      if (!e.client_ref_id) continue; // Require client_ref_id for deduplication
+      
+      await db.query(
+        `INSERT INTO points_log (user_id, session_id, points_earned, earned_at, client_ref_id)
+         VALUES (?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE log_id = log_id`,
+        [
+          user_id,
+          0,                                          // session_id = 0
+          e.amount ?? 0,
+          e.logged_at ? new Date(e.logged_at) : new Date(),
+          e.client_ref_id
+        ]
+      );
+      syncedCount++;
+    }
 
     return res.status(200).json({
       message: 'Coins synced.',
-      synced:  entries.length,
+      synced:  syncedCount,
     });
   } catch (err) {
     console.error('Sync coins error:', err);
@@ -133,7 +154,7 @@ router.post('/coins', auth, async (req, res) => {
 //   leaderboard_rank
 // ════════════════════════════════════════════════════════════════════════════════
 router.get('/pull', auth, async (req, res) => {
-  const user_id = req.user.role_id;
+  const user_id = req.user.user_id;
 
   try {
     const [
@@ -142,6 +163,7 @@ router.get('/pull', auth, async (req, res) => {
       [pointsLog],
       [badges],
       [rankRow],
+      [totalRow],
     ] = await Promise.all([
 
       // User profile
@@ -207,14 +229,22 @@ router.get('/pull', auth, async (req, res) => {
          ) higher`,
         [user_id]
       ),
+
+      // Total points (all-time, not just last 100)
+      db.query(
+        `SELECT COALESCE(SUM(points_earned), 0) AS total
+         FROM points_log
+         WHERE user_id = ?`,
+        [user_id]
+      ),
     ]);
 
     if (!userRows[0]) {
       return res.status(404).json({ message: 'User not found.' });
     }
 
-    // Total points
-    const total_points = pointsLog.reduce((s, p) => s + (p.points_earned || 0), 0);
+    // Total points (from dedicated SUM query, not truncated to 100 rows)
+    const total_points = totalRow[0]?.total ?? 0;
 
     return res.status(200).json({
       user:           userRows[0],
