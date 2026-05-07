@@ -18,7 +18,6 @@ const getGameDashboard = async (req, res) => {
     }
 
     for (const path of paths) {
-      // Total games
       const [totalRow] = await db.query(
         `SELECT COUNT(DISTINCT g.game_id) AS total
          FROM games g
@@ -28,7 +27,6 @@ const getGameDashboard = async (req, res) => {
 
       path.total_games = totalRow[0].total;
 
-      // ✅ FIXED: recipe_id → game_id
       const [passedRow] = await db.query(
         `SELECT COUNT(DISTINCT gs.game_id) AS passed
          FROM game_sessions gs
@@ -96,7 +94,6 @@ const getPathGames = async (req, res) => {
 
     const gameIds = games.map(g => g.game_id);
 
-    // ✅ FIXED: recipe_id → game_id
     const [sessions] = await db.query(
       `SELECT
          gs.game_id,
@@ -211,7 +208,7 @@ const getAchievements = async (req, res) => {
     );
 
     const [badges] = await db.query(
-      `SELECT b.badge_id, b.name, b.description, b.icon_url, ub.earned_at
+      `SELECT b.badge_id, b.name, b.slug, b.description, b.icon_url, ub.earned_at
        FROM user_badges ub
        JOIN badges b ON b.badge_id = ub.badge_id
        WHERE ub.user_id = ?
