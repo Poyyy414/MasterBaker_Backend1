@@ -86,7 +86,7 @@ const _tryAwardBadge = async (conn, user_id, badge_id) => {
 // ════════════════════════════════════════════════════════════════════════════════
 // SAVE GAME SESSION + LOG POINTS + AUTO-AWARD BADGES
 // POST /api/student/game-sessions
-// ══
+// ════════════════════════════════════════════════════════════════════════════════
 const createGameSession = async (req, res) => {
   const conn = await db.getConnection();
   try {
@@ -189,16 +189,16 @@ const createGameSession = async (req, res) => {
 
     // ── Save session ──────────────────────────────────────────────────────────
     const [result] = await conn.query(
-  `INSERT INTO game_sessions (user_id, game_id, game_type_id, score, total_items, points_earned)
-   VALUES (?, ?, ?, ?, ?, ?)`,
-  [user_id, game_id, game_type_id, score, total, points_earned]
-);
-const session_id = result.insertId; // ← use this, NOT 0
+      `INSERT INTO game_sessions (user_id, game_id, game_type_id, score, total_items, points_earned)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [user_id, game_id, game_type_id, score, total, points_earned]
+    );
+    const session_id = result.insertId;
 
-await conn.query(
-  `INSERT INTO points_log (user_id, session_id, points_earned) VALUES (?, ?, ?)`,
-  [user_id, session_id, points_earned]
-);
+    await conn.query(
+      `INSERT INTO points_log (user_id, session_id, points_earned) VALUES (?, ?, ?)`,
+      [user_id, session_id, points_earned]
+    );
 
     // ── Award badges ──────────────────────────────────────────────────────────
     const badges_earned = await awardBadges(conn, user_id, score, total);
@@ -487,11 +487,11 @@ const getGameProgress = async (req, res) => {
     const [sessions] = await db.query(
       `SELECT g.path_id, gt.code AS game_type_code, g.difficulty,
         MAX(gs.score / gs.total_items) AS best_ratio
- FROM game_sessions gs
- JOIN games      g  ON g.game_id       = gs.game_id
- JOIN game_types gt ON gt.game_type_id = gs.game_type_id
- WHERE gs.user_id = ? AND gs.total_items > 0
- GROUP BY g.game_id, g.path_id, gt.code, g.difficulty`,
+       FROM game_sessions gs
+       JOIN games      g  ON g.game_id       = gs.game_id
+       JOIN game_types gt ON gt.game_type_id = gs.game_type_id
+       WHERE gs.user_id = ? AND gs.total_items > 0
+       GROUP BY g.game_id, g.path_id, gt.code, g.difficulty`,
       [user_id]
     );
 
@@ -511,7 +511,7 @@ const getGameProgress = async (req, res) => {
   }
 };
 
-// POST /api/student/game-progress  (client pushes its local map)
+// POST /api/student/game-progress
 const saveGameProgress = async (req, res) => {
   try {
     const user_id = req.user.user_id;
@@ -553,16 +553,14 @@ const addPoints = async (req, res) => {
   }
 };
 
-// POST /api/achievements/:achievementId/unlock/:studentId  (studentId = user_id here)
+// POST /api/student/achievements/:achievementId/unlock/:studentId
 const unlockAchievement = async (req, res) => {
   try {
     const { achievementId, studentId } = req.params;
-    // achievementId may be a string slug (e.g. "first_batch") or a numeric badge_id.
-    // Look up by name so string slugs resolve correctly to the right badge_id.
     await db.query(
       `INSERT IGNORE INTO user_badges (user_id, badge_id)
-       SELECT ?, badge_id FROM badges WHERE name = ? OR badge_id = ?`,
-      [studentId, achievementId, isNaN(Number(achievementId)) ? -1 : Number(achievementId)]
+       SELECT ?, badge_id FROM badges WHERE slug = ? OR name = ? OR badge_id = ?`,
+      [studentId, achievementId, achievementId, isNaN(Number(achievementId)) ? -1 : Number(achievementId)]
     );
     return res.status(200).json({ message: 'Achievement unlocked.' });
   } catch (err) {
