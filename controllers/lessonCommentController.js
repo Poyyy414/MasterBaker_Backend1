@@ -3,9 +3,10 @@ const db = require('../config/db');
 const resolveName = (u) =>
   u.name || `${u.firstname ?? u.firstName ?? ''}`.trim() || 'User';
 
+// GET /api/lessons/:lessonId/messages
 const getMyThread = async (req, res) => {
   const { lessonId } = req.params;
-  const studentId = req.user.id;
+  const studentId    = req.user.user_id;
   try {
     const [rows] = await db.query(
       `SELECT id, sender_id, sender_name, sender_role, content, created_at
@@ -21,23 +22,25 @@ const getMyThread = async (req, res) => {
   }
 };
 
+// POST /api/lessons/:lessonId/messages
 const sendMessage = async (req, res) => {
   const { lessonId } = req.params;
-  const { content } = req.body;
-  const user = req.user;
+  const { content }  = req.body;
+  const user         = req.user;
 
   if (!content?.trim()) {
     return res.status(400).json({ message: 'Message cannot be empty.' });
   }
 
-  const sender_name = resolveName(user);
+  const sender_name  = resolveName(user);
+  const student_name = sender_name;
 
   try {
     const [result] = await db.query(
       `INSERT INTO lesson_messages
          (lesson_id, student_id, student_name, sender_id, sender_name, sender_role, content)
        VALUES (?, ?, ?, ?, ?, 'student', ?)`,
-      [lessonId, user.id, sender_name, user.id, sender_name, content.trim()]
+      [lessonId, user.user_id, student_name, user.user_id, sender_name, content.trim()]
     );
     const [rows] = await db.query('SELECT * FROM lesson_messages WHERE id = ?', [result.insertId]);
     res.status(201).json(rows[0]);
@@ -47,16 +50,17 @@ const sendMessage = async (req, res) => {
   }
 };
 
+// GET /api/lessons/:lessonId/threads
 const getThreadList = async (req, res) => {
   const { lessonId } = req.params;
   try {
     const [rows] = await db.query(
       `SELECT student_id, student_name,
-              MAX(created_at) AS last_message_at,
-              COUNT(*) AS message_count,
+              MAX(created_at)                              AS last_message_at,
+              COUNT(*)                                     AS message_count,
               (SELECT content FROM lesson_messages m2
                WHERE m2.lesson_id = m1.lesson_id AND m2.student_id = m1.student_id
-               ORDER BY created_at DESC LIMIT 1) AS last_message
+               ORDER BY created_at DESC LIMIT 1)          AS last_message
        FROM lesson_messages m1
        WHERE lesson_id = ?
        GROUP BY student_id, student_name
@@ -70,6 +74,7 @@ const getThreadList = async (req, res) => {
   }
 };
 
+// GET /api/lessons/:lessonId/threads/:studentId
 const getStudentThread = async (req, res) => {
   const { lessonId, studentId } = req.params;
   try {
@@ -87,10 +92,11 @@ const getStudentThread = async (req, res) => {
   }
 };
 
+// POST /api/lessons/:lessonId/threads/:studentId
 const replyToStudent = async (req, res) => {
   const { lessonId, studentId } = req.params;
-  const { content } = req.body;
-  const teacher = req.user;
+  const { content }             = req.body;
+  const teacher                 = req.user;
 
   if (!content?.trim()) {
     return res.status(400).json({ message: 'Reply cannot be empty.' });
@@ -110,7 +116,7 @@ const replyToStudent = async (req, res) => {
       `INSERT INTO lesson_messages
          (lesson_id, student_id, student_name, sender_id, sender_name, sender_role, content)
        VALUES (?, ?, ?, ?, ?, 'teacher', ?)`,
-      [lessonId, studentId, students[0].student_name, teacher.id, resolveName(teacher), content.trim()]
+      [lessonId, studentId, students[0].student_name, teacher.user_id, resolveName(teacher), content.trim()]
     );
     const [rows] = await db.query('SELECT * FROM lesson_messages WHERE id = ?', [result.insertId]);
     res.status(201).json(rows[0]);
@@ -120,9 +126,10 @@ const replyToStudent = async (req, res) => {
   }
 };
 
+// DELETE /api/lessons/messages/:messageId
 const deleteMessage = async (req, res) => {
-  const { messageId } = req.params;
-  const { id: uid, role } = req.user;
+  const { messageId }          = req.params;
+  const { user_id: uid, role } = req.user;
   try {
     const [rows] = await db.query('SELECT * FROM lesson_messages WHERE id = ?', [messageId]);
     if (!rows.length) return res.status(404).json({ message: 'Message not found.' });
