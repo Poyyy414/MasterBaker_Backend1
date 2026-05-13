@@ -1,26 +1,11 @@
 const express = require('express');
 const router  = express.Router();
 
-const { verifyToken, isTeacher } = require('../middleware/authMiddleware');
-const {
-  getMyThread,
-  sendMessage,
-  getThreadList,
-  getStudentThread,
-  replyToStudent,
-  deleteMessage,
-} = require('../controllers/lessonCommentController');
+const { verifyToken } = require('../middleware/authMiddleware');
+const { getComments, addComment, deleteComment } = require('../controllers/lessonCommentController');
 
-// Student
-router.get   ('/:lessonId/messages',            verifyToken, getMyThread);
-router.post  ('/:lessonId/messages',            verifyToken, sendMessage);
-
-// Teacher
-router.get   ('/:lessonId/threads',             verifyToken, isTeacher, getThreadList);
-router.get   ('/:lessonId/threads/:studentId',  verifyToken, isTeacher, getStudentThread);
-router.post  ('/:lessonId/threads/:studentId',  verifyToken, isTeacher, replyToStudent);
-
-// Shared
-router.delete('/messages/:messageId',           verifyToken, deleteMessage);
+router.get   ('/:lessonId/comments',  verifyToken, getComments);
+router.post  ('/:lessonId/comments',  verifyToken, addComment);
+router.delete('/comments/:commentId', verifyToken, deleteComment);
 
 module.exports = router;
