@@ -1,18 +1,19 @@
 const db = require('../config/db');
 
-const resolveName = (u) =>
-  u.name || `${u.firstname ?? u.firstName ?? ''}`.trim() || 'User';
-
 // GET /api/lessons/:lessonId/messages
 const getMyThread = async (req, res) => {
   const { lessonId } = req.params;
   const studentId    = req.user.user_id;
   try {
     const [rows] = await db.query(
-      `SELECT id, sender_id, sender_name, sender_role, content, created_at
-       FROM lesson_messages
-       WHERE lesson_id = ? AND student_id = ?
-       ORDER BY created_at ASC`,
+      `SELECT m.id, m.sender_id,
+              CONCAT(u.firstname, ' ', u.lastname) AS sender_name,
+              u.avatar_url                          AS sender_avatar,
+              m.sender_role, m.content, m.created_at
+       FROM lesson_messages m
+       LEFT JOIN users u ON u.user_id = m.sender_id
+       WHERE m.lesson_id = ? AND m.student_id = ?
+       ORDER BY m.created_at ASC`,
       [lessonId, studentId]
     );
     res.json(rows);
@@ -32,17 +33,30 @@ const sendMessage = async (req, res) => {
     return res.status(400).json({ message: 'Message cannot be empty.' });
   }
 
-  const sender_name  = resolveName(user);
-  const student_name = sender_name;
-
   try {
+    const [users] = await db.query(
+      'SELECT firstname, lastname, avatar_url FROM users WHERE user_id = ?',
+      [user.user_id]
+    );
+    const u        = users[0] ?? {};
+    const fullName = `${u.firstname ?? ''} ${u.lastname ?? ''}`.trim() || 'User';
+
     const [result] = await db.query(
       `INSERT INTO lesson_messages
          (lesson_id, student_id, student_name, sender_id, sender_name, sender_role, content)
        VALUES (?, ?, ?, ?, ?, 'student', ?)`,
-      [lessonId, user.user_id, student_name, user.user_id, sender_name, content.trim()]
+      [lessonId, user.user_id, fullName, user.user_id, fullName, content.trim()]
     );
-    const [rows] = await db.query('SELECT * FROM lesson_messages WHERE id = ?', [result.insertId]);
+    const [rows] = await db.query(
+      `SELECT m.id, m.sender_id,
+              CONCAT(u2.firstname, ' ', u2.lastname) AS sender_name,
+              u2.avatar_url                           AS sender_avatar,
+              m.sender_role, m.content, m.created_at
+       FROM lesson_messages m
+       LEFT JOIN users u2 ON u2.user_id = m.sender_id
+       WHERE m.id = ?`,
+      [result.insertId]
+    );
     res.status(201).json(rows[0]);
   } catch (err) {
     console.error('[sendMessage]', err);
@@ -55,15 +69,18 @@ const getThreadList = async (req, res) => {
   const { lessonId } = req.params;
   try {
     const [rows] = await db.query(
-      `SELECT student_id, student_name,
-              MAX(created_at)                              AS last_message_at,
-              COUNT(*)                                     AS message_count,
+      `SELECT m1.student_id,
+              CONCAT(u.firstname, ' ', u.lastname) AS student_name,
+              u.avatar_url                          AS student_avatar,
+              MAX(m1.created_at)                    AS last_message_at,
+              COUNT(*)                              AS message_count,
               (SELECT content FROM lesson_messages m2
                WHERE m2.lesson_id = m1.lesson_id AND m2.student_id = m1.student_id
-               ORDER BY created_at DESC LIMIT 1)          AS last_message
+               ORDER BY created_at DESC LIMIT 1)   AS last_message
        FROM lesson_messages m1
-       WHERE lesson_id = ?
-       GROUP BY student_id, student_name
+       LEFT JOIN users u ON u.user_id = m1.student_id
+       WHERE m1.lesson_id = ?
+       GROUP BY m1.student_id, u.firstname, u.lastname, u.avatar_url
        ORDER BY last_message_at DESC`,
       [lessonId]
     );
@@ -79,10 +96,14 @@ const getStudentThread = async (req, res) => {
   const { lessonId, studentId } = req.params;
   try {
     const [rows] = await db.query(
-      `SELECT id, sender_id, sender_name, sender_role, content, created_at
-       FROM lesson_messages
-       WHERE lesson_id = ? AND student_id = ?
-       ORDER BY created_at ASC`,
+      `SELECT m.id, m.sender_id,
+              CONCAT(u.firstname, ' ', u.lastname) AS sender_name,
+              u.avatar_url                          AS sender_avatar,
+              m.sender_role, m.content, m.created_at
+       FROM lesson_messages m
+       LEFT JOIN users u ON u.user_id = m.sender_id
+       WHERE m.lesson_id = ? AND m.student_id = ?
+       ORDER BY m.created_at ASC`,
       [lessonId, studentId]
     );
     res.json(rows);
@@ -104,21 +125,37 @@ const replyToStudent = async (req, res) => {
 
   try {
     const [students] = await db.query(
-      `SELECT student_name FROM lesson_messages
-       WHERE lesson_id = ? AND student_id = ? LIMIT 1`,
-      [lessonId, studentId]
+      `SELECT CONCAT(u.firstname, ' ', u.lastname) AS student_name
+       FROM users u WHERE u.user_id = ?`,
+      [studentId]
     );
     if (!students.length) {
-      return res.status(404).json({ message: 'No thread found for this student.' });
+      return res.status(404).json({ message: 'Student not found.' });
     }
+
+    const [teachers] = await db.query(
+      'SELECT firstname, lastname FROM users WHERE user_id = ?',
+      [teacher.user_id]
+    );
+    const t           = teachers[0] ?? {};
+    const teacherName = `${t.firstname ?? ''} ${t.lastname ?? ''}`.trim() || 'Teacher';
 
     const [result] = await db.query(
       `INSERT INTO lesson_messages
          (lesson_id, student_id, student_name, sender_id, sender_name, sender_role, content)
        VALUES (?, ?, ?, ?, ?, 'teacher', ?)`,
-      [lessonId, studentId, students[0].student_name, teacher.user_id, resolveName(teacher), content.trim()]
+      [lessonId, studentId, students[0].student_name, teacher.user_id, teacherName, content.trim()]
     );
-    const [rows] = await db.query('SELECT * FROM lesson_messages WHERE id = ?', [result.insertId]);
+    const [rows] = await db.query(
+      `SELECT m.id, m.sender_id,
+              CONCAT(u.firstname, ' ', u.lastname) AS sender_name,
+              u.avatar_url                          AS sender_avatar,
+              m.sender_role, m.content, m.created_at
+       FROM lesson_messages m
+       LEFT JOIN users u ON u.user_id = m.sender_id
+       WHERE m.id = ?`,
+      [result.insertId]
+    );
     res.status(201).json(rows[0]);
   } catch (err) {
     console.error('[replyToStudent]', err);
