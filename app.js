@@ -7,6 +7,7 @@ const teacherRoutes = require('./routes/teacherRoutes');
 const studentRoutes = require('./routes/studentRoutes');
 const uploadRoutes  = require('./routes/uploadRoutes');
 const syncRoutes    = require('./routes/syncRoutes');
+const lessonRoutes   = require('./routes/lessonRoutes');
 
 const app = express();
 
@@ -21,6 +22,7 @@ app.use('/api/teacher', teacherRoutes);
 app.use('/api/student', studentRoutes);
 app.use('/api/upload',  uploadRoutes);
 app.use('/api/sync',    syncRoutes);
+app.use('/api/lessons', lessonRoutes);
 
 // ── 404 ───────────────────────────────────────────────────────────────────────
 app.use((req, res) => {
